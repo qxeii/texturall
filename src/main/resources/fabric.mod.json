@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "texturall",
+  "version": "${version}",
+  "name": "Texturall",
+  "description": "",
+  "authors": [],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "environment": "client",
+  "entrypoints": {
+    "fabric-datagen": [
+      "net.qxeii.texturall.client.TexturallDataGenerator"
+    ],
+    "client": [
+      "net.qxeii.texturall.client.TexturallClient"
+    ],
+    "main": [
+      "net.qxeii.texturall.Texturall"
+    ]
+  },
+  "mixins": [
+    "texturall.mixins.json",
+    {
+      "config": "texturall.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
