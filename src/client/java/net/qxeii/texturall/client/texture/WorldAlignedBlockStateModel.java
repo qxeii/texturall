@@ -126,7 +126,25 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
     }
 
     private void remapUv(MutableQuadView quadView, BlockPos pos, Direction face) {
-        int tileSpan = material.sheetSize();
+        float sheetPixels = material.sheetSize() * 16.0F;
+
+        // Minimum faceU/V for this face, derived directly from block position.
+        // Used as the wrap anchor so all four vertex offsets (always 0 or +1) stay
+        // on the same side of the sheet boundary.
+        float minU = switch (face) {
+            case UP, DOWN, NORTH -> pos.getX();
+            case SOUTH -> -(pos.getX() + 1);
+            case EAST -> pos.getZ();
+            case WEST -> -(pos.getZ() + 1);
+        };
+        float minV = switch (face) {
+            case DOWN -> pos.getZ();
+            case UP -> -(pos.getZ() + 1);
+            default -> -(pos.getY() + 1);
+        };
+        float baseU = wrapPixels(minU * 16.0F, sheetPixels);
+        float baseV = wrapPixels(minV * 16.0F, sheetPixels);
+
         for (int vertex = 0; vertex < 4; vertex++) {
             float worldX = pos.getX() + quadView.x(vertex);
             float worldY = pos.getY() + quadView.y(vertex);
@@ -140,11 +158,9 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
             float faceV = switch (face) {
                 case UP -> -worldZ;
                 case DOWN -> worldZ;
-                case NORTH, SOUTH, EAST, WEST -> -worldY;
+                default -> -worldY;
             };
-            float worldU = wrapPixels(faceU * 16.0F, tileSpan * 16.0F);
-            float worldV = wrapPixels(faceV * 16.0F, tileSpan * 16.0F);
-            quadView.uv(vertex, worldU / (tileSpan * 16.0F), worldV / (tileSpan * 16.0F));
+            quadView.uv(vertex, (baseU + (faceU - minU) * 16.0F) / sheetPixels, (baseV + (faceV - minV) * 16.0F) / sheetPixels);
         }
     }
 

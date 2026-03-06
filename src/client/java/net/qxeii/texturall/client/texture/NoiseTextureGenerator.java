@@ -10,18 +10,22 @@ public final class NoiseTextureGenerator implements ProceduralTextureGenerator {
     private final long seed;
     private final double scale;
     private final int[][] palette;
-    private final SimplexNoise largeNoise;
+    private final SimplexNoise noise;
     private final SimplexNoise mediumNoise;
     private final SimplexNoise fineNoise;
+    private final SimplexNoise warpNoiseX;
+    private final SimplexNoise warpNoiseY;
 
     public NoiseTextureGenerator(int size, long seed, double scale, int[][] palette) {
         this.size = size;
         this.seed = seed;
         this.scale = scale;
         this.palette = palette;
-        this.largeNoise = new SimplexNoise(seed);
+        this.noise = new SimplexNoise(seed);
         this.mediumNoise = new SimplexNoise(seed ^ 0x9E3779B97F4A7C15L);
         this.fineNoise = new SimplexNoise(seed ^ 0xC6BC279692B5C323L);
+        this.warpNoiseX = new SimplexNoise(seed ^ 0x517CC1B727220A95L);
+        this.warpNoiseY = new SimplexNoise(seed ^ 0xBF58476D1CE4E5B9L);
     }
 
     @Override
@@ -56,24 +60,15 @@ public final class NoiseTextureGenerator implements ProceduralTextureGenerator {
     }
 
     public double sample(int pixelX, int pixelY) {
-        double nx = pixelX / scale;
-        double ny = pixelY / scale;
-        double shape = remap(largeNoise.sample(nx, ny), -1.0, 1.0, 0.0, 1.0);
-        double strata = remap(mediumNoise.sample(nx * 2.5, ny * 0.8), -1.0, 1.0, 0.0, 1.0);
-        double grain = remap(fineNoise.sample(nx * 6.0, ny * 6.0), -1.0, 1.0, 0.0, 1.0);
-        return clamp(shape * 0.55 + strata * 0.3 + grain * 0.15);
+        double x = pixelX / scale;
+        double y = pixelY / scale;
+        double wx = warpNoiseX.sample(x, y) * 2.0f;
+        double wy = warpNoiseY.sample(x, y) * 2.0f;
+        double shape = noise.sample((x + wx) * 0.1, (y + wy) * 0.2) * 0.5 + 0.5;
+        return shape;
     }
 
     private static int lerp(int start, int end, double alpha) {
         return (int) Math.round(start + (end - start) * alpha);
-    }
-
-    private static double remap(double value, double inMin, double inMax, double outMin, double outMax) {
-        double normalized = (value - inMin) / (inMax - inMin);
-        return outMin + normalized * (outMax - outMin);
-    }
-
-    private static double clamp(double value) {
-        return Math.max(0.0, Math.min(1.0, value));
     }
 }
