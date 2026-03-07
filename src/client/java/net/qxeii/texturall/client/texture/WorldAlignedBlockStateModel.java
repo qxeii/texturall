@@ -2,6 +2,7 @@ package net.qxeii.texturall.client.texture;
 
 import net.fabricmc.fabric.api.renderer.v1.mesh.MutableQuadView;
 import net.fabricmc.fabric.api.renderer.v1.mesh.QuadEmitter;
+import net.fabricmc.fabric.api.renderer.v1.mesh.ShadeMode;
 import net.fabricmc.fabric.api.renderer.v1.model.FabricBlockStateModel;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
@@ -21,11 +22,11 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
     private static final int WHITE = 0xFFFFFFFF;
 
     private final BlockStateModel delegate;
-    private final WorldAlignedTextureMaterial material;
+    private final WorldAlignedTextureMaterial mat;
 
-    public WorldAlignedBlockStateModel(BlockStateModel delegate, WorldAlignedTextureMaterial material) {
+    public WorldAlignedBlockStateModel(BlockStateModel delegate, WorldAlignedTextureMaterial mat) {
         this.delegate = delegate;
-        this.material = material;
+        this.mat = mat;
     }
 
     @Override
@@ -56,7 +57,6 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
             if (cullTest.test(face)) {
                 continue;
             }
-
             emitCanonicalFace(emitter, pos, face);
         }
     }
@@ -65,15 +65,19 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
     public @Nullable Object createGeometryKey(BlockRenderView blockView, BlockPos pos, BlockState state, Random random) {
         return new GeometryKey(
             delegate.getClass(),
-            Math.floorMod(pos.getX(), material.sheetSize()),
-            Math.floorMod(pos.getY(), material.sheetSize()),
-            Math.floorMod(pos.getZ(), material.sheetSize())
+            Math.floorMod(pos.getX(), mat.sheetSize()),
+            Math.floorMod(pos.getY(), mat.sheetSize()),
+            Math.floorMod(pos.getZ(), mat.sheetSize())
         );
     }
 
     private void emitCanonicalFace(QuadEmitter emitter, BlockPos pos, Direction face) {
         emitter.nominalFace(face);
         emitter.cullFace(face);
+        // Disable Indigo's baked directional shading so vertex colors carry only
+        // the lightmap value. block.fsh applies per-pixel directional shading instead.
+        emitter.diffuseShade(false);
+        emitter.shadeMode(ShadeMode.VANILLA);
         writeFacePositions(emitter, face);
         emitter.color(0, WHITE);
         emitter.color(1, WHITE);
@@ -82,6 +86,42 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         remapUv(emitter, pos, face);
         emitter.spriteBake(sheetSprite(), MutableQuadView.BAKE_NORMALIZED);
         emitter.emit();
+    }
+
+    private void remapUv(MutableQuadView quad, BlockPos pos, Direction face) {
+        float sheetPixels = mat.sheetSize() * 16.0F;
+        float minU = switch (face) {
+            case UP, DOWN, NORTH -> pos.getX();
+            case SOUTH -> -(pos.getX() + 1);
+            case EAST -> pos.getZ();
+            case WEST -> -(pos.getZ() + 1);
+        };
+        float minV = switch (face) {
+            case DOWN -> pos.getZ();
+            case UP -> -(pos.getZ() + 1);
+            default -> -(pos.getY() + 1);
+        };
+        float baseU = wrapPixels(minU * 16.0F, sheetPixels);
+        float baseV = wrapPixels(minV * 16.0F, sheetPixels);
+
+        for (int v = 0; v < 4; v++) {
+            float worldX = pos.getX() + quad.x(v);
+            float worldY = pos.getY() + quad.y(v);
+            float worldZ = pos.getZ() + quad.z(v);
+            float faceU = switch (face) {
+                case UP, DOWN, NORTH -> worldX;
+                case SOUTH -> -worldX;
+                case EAST -> worldZ;
+                case WEST -> -worldZ;
+            };
+            float faceV = switch (face) {
+                case UP -> -worldZ;
+                case DOWN -> worldZ;
+                default -> -worldY;
+            };
+            quad.uv(v, (baseU + (faceU - minU) * 16.0F) / sheetPixels,
+                       (baseV + (faceV - minV) * 16.0F) / sheetPixels);
+        }
     }
 
     private static void writeFacePositions(QuadEmitter emitter, Direction face) {
@@ -125,52 +165,13 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         }
     }
 
-    private void remapUv(MutableQuadView quadView, BlockPos pos, Direction face) {
-        float sheetPixels = material.sheetSize() * 16.0F;
-
-        // Minimum faceU/V for this face, derived directly from block position.
-        // Used as the wrap anchor so all four vertex offsets (always 0 or +1) stay
-        // on the same side of the sheet boundary.
-        float minU = switch (face) {
-            case UP, DOWN, NORTH -> pos.getX();
-            case SOUTH -> -(pos.getX() + 1);
-            case EAST -> pos.getZ();
-            case WEST -> -(pos.getZ() + 1);
-        };
-        float minV = switch (face) {
-            case DOWN -> pos.getZ();
-            case UP -> -(pos.getZ() + 1);
-            default -> -(pos.getY() + 1);
-        };
-        float baseU = wrapPixels(minU * 16.0F, sheetPixels);
-        float baseV = wrapPixels(minV * 16.0F, sheetPixels);
-
-        for (int vertex = 0; vertex < 4; vertex++) {
-            float worldX = pos.getX() + quadView.x(vertex);
-            float worldY = pos.getY() + quadView.y(vertex);
-            float worldZ = pos.getZ() + quadView.z(vertex);
-            float faceU = switch (face) {
-                case UP, DOWN, NORTH -> worldX;
-                case SOUTH -> -worldX;
-                case EAST -> worldZ;
-                case WEST -> -worldZ;
-            };
-            float faceV = switch (face) {
-                case UP -> -worldZ;
-                case DOWN -> worldZ;
-                default -> -worldY;
-            };
-            quadView.uv(vertex, (baseU + (faceU - minU) * 16.0F) / sheetPixels, (baseV + (faceV - minV) * 16.0F) / sheetPixels);
-        }
-    }
-
     private static float wrapPixels(float value, float bound) {
         float wrapped = value % bound;
         return wrapped < 0.0F ? wrapped + bound : wrapped;
     }
 
     private Sprite sheetSprite() {
-        return MinecraftClient.getInstance().getAtlasManager().getSprite(material.spriteId());
+        return MinecraftClient.getInstance().getAtlasManager().getSprite(mat.spriteId());
     }
 
     private record GeometryKey(Class<?> delegateType, int x, int y, int z) {

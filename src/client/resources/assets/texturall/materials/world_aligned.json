@@ -1,0 +1,4 @@
+{
+    "vertexSource": "texturall:shaders/material/world_aligned.vert",
+    "fragmentSource": "texturall:shaders/material/world_aligned.frag"
+}
