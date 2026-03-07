@@ -6,11 +6,14 @@
 #moj_import <minecraft:chunksection.glsl>
 
 uniform sampler2D Sampler0;
+uniform sampler2D Sampler2;
 
 in float sphericalVertexDistance;
 in float cylindricalVertexDistance;
 in vec4 vertexColor;
 in vec2 texCoord0;
+in vec4 v_baseColor;
+in vec2 v_lightUv;
 in vec3 v_worldPos;
 in vec3 v_faceNormal;
 
@@ -66,6 +69,28 @@ vec3 decodeNormal(vec4 encoded) {
     return normalize(encoded.xyz * 2.0 - 1.0);
 }
 
+vec3 normalizeOr(vec3 direction, vec3 fallback) {
+    float lengthSquared = dot(direction, direction);
+    if (lengthSquared > 1.0e-6) {
+        return direction * inversesqrt(lengthSquared);
+    }
+    return fallback;
+}
+
+float horizonFade(vec3 lightDirection) {
+    return smoothstep(0.0, 0.25, lightDirection.y);
+}
+
+float lambert(vec3 normal, vec3 lightDirection) {
+    return max(dot(normal, lightDirection), 0.0);
+}
+
+const float LIGHTMAP_MIN = 0.5 / 16.0;
+
+vec3 sampleLightmapAxis(vec2 uv) {
+    return texture(Sampler2, clamp(uv, vec2(LIGHTMAP_MIN), vec2(15.5 / 16.0))).rgb;
+}
+
 vec3 axisAlignedNormal(vec3 normal) {
     vec3 absNormal = abs(normal);
     if (absNormal.x > absNormal.y && absNormal.x > absNormal.z) {
@@ -108,23 +133,32 @@ void main() {
 #endif
 
     vec4 color;
-    int materialId = int(round(vertexColor.a * 255.0));
+    int materialId = int(round(v_baseColor.a * 255.0));
 
     if (materialId > 0 && materialId < 5) {
         vec3 faceNormal = axisAlignedNormal(normalize(v_faceNormal));
+        mat3 tbn = faceTbn(faceNormal);
         ivec2 texSize = textureSize(Sampler0, 0);
         ivec2 normalTexel = snappedTexelCoord(texCoord0, texSize);
         vec3 tsNormal = decodeNormal(texelFetch(Sampler0, normalTexel, 0));
-        vec3 worldNormal = normalize(faceTbn(faceNormal) * tsNormal);
-        vec3 sunDirection = Light0_Direction;
-        float sunDirectionLengthSquared = dot(sunDirection, sunDirection);
-        if (sunDirectionLengthSquared > 1.0e-6) {
-            sunDirection *= inversesqrt(sunDirectionLengthSquared);
-        } else {
-            sunDirection = vec3(0.0, 1.0, 0.0);
-        }
-        float sunShade = clamp(dot(worldNormal, sunDirection) * 0.5 + 0.5, 0.0, 1.0);
-        color = vec4(vertexColor.rgb * sunShade, 1.0);
+        vec3 worldNormal = normalize(tbn * tsNormal);
+
+        vec3 sunDirection = normalizeOr(Light0_Direction, vec3(0.0, 1.0, 0.0));
+        vec3 moonDirection = normalizeOr(Light1_Direction, -sunDirection);
+
+        float sunShade = lambert(worldNormal, sunDirection) * horizonFade(sunDirection);
+        float moonShade = lambert(worldNormal, moonDirection) * horizonFade(moonDirection);
+
+        vec3 lightFloor = sampleLightmapAxis(vec2(LIGHTMAP_MIN));
+        vec3 skyLight = max(sampleLightmapAxis(vec2(LIGHTMAP_MIN, v_lightUv.y)) - lightFloor, vec3(0.0));
+        vec3 blockLight = max(sampleLightmapAxis(vec2(v_lightUv.x, LIGHTMAP_MIN)) - lightFloor, vec3(0.0));
+
+        // The lightmap does not expose local block-light vectors, so use a stable face-local key direction.
+        vec3 blockDirection = normalize(tbn * normalize(vec3(0.35, 0.45, 0.82)));
+        float blockShade = clamp(dot(worldNormal, blockDirection) * 0.35 + 0.65, 0.0, 1.0);
+
+        vec3 lighting = skyLight * max(sunShade, moonShade) + blockLight * blockShade;
+        color = vec4(v_baseColor.rgb * lighting, 1.0);
     } else {
         // --- Vanilla block: unchanged ---
         color = texColor * vertexColor;

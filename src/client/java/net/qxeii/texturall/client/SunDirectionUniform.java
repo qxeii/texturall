@@ -28,14 +28,17 @@ public final class SunDirectionUniform {
 
         WorldRenderState worldRenderState = ((WorldRendererAccessor) client.worldRenderer).texturall$getWorldRenderState();
         float sunAngle = worldRenderState.skyRenderState.sunAngle;
+        float moonAngle = worldRenderState.skyRenderState.moonAngle;
 
-        float x = (float) -Math.sin(sunAngle);
-        float y = (float) Math.cos(sunAngle);
+        float sunX = (float) -Math.sin(sunAngle);
+        float sunY = (float) Math.cos(sunAngle);
+        float moonX = (float) -Math.sin(moonAngle);
+        float moonY = (float) Math.cos(moonAngle);
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             var data = Std140Builder.onStack(stack, SIZE)
-                .putVec3(x, y, 0.0F)
-                .putVec3(0.0F, 0.0F, 0.0F)
+                .putVec3(sunX, sunY, 0.0F)
+                .putVec3(moonX, moonY, 0.0F)
                 .get();
             RenderSystem.getDevice()
                 .createCommandEncoder()
