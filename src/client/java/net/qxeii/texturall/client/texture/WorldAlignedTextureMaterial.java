@@ -10,12 +10,15 @@ public record WorldAlignedTextureMaterial(
     Identifier tileTextureId,
     Identifier sheetTextureResourceId,
     Identifier sheetSpriteId,
+    Identifier normalTextureResourceId,
+    Identifier normalSpriteId,
+    int materialIndex,
     long seed,
     double scale,
     int[][] palette,
     int sheetSize
 ) {
     public SpriteIdentifier spriteId() {
-        return new SpriteIdentifier(SpriteAtlasTexture.BLOCK_ATLAS_TEXTURE, sheetSpriteId);
+        return new SpriteIdentifier(SpriteAtlasTexture.BLOCK_ATLAS_TEXTURE, normalSpriteId);
     }
 }

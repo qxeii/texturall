@@ -79,10 +79,11 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         emitter.diffuseShade(false);
         emitter.shadeMode(ShadeMode.VANILLA);
         writeFacePositions(emitter, face);
-        emitter.color(0, WHITE);
-        emitter.color(1, WHITE);
-        emitter.color(2, WHITE);
-        emitter.color(3, WHITE);
+        int materialMarker = 0x00FFFFFF | (mat.materialIndex() << 24);
+        emitter.color(0, materialMarker);
+        emitter.color(1, materialMarker);
+        emitter.color(2, materialMarker);
+        emitter.color(3, materialMarker);
         remapUv(emitter, pos, face);
         emitter.spriteBake(sheetSprite(), MutableQuadView.BAKE_NORMALIZED);
         emitter.emit();

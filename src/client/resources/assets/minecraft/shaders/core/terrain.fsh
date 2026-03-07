@@ -6,10 +6,12 @@
 
 uniform sampler2D Sampler0;
 uniform sampler2D Sampler2;
-uniform vec3 u_sunDirection;
 
 const float AMBIENT       = 0.0;
-const float NORMAL_STRENGTH = 5.0;
+
+layout(std140) uniform SunDirectionInfo {
+    vec3 SunDirection;
+};
 
 in float sphericalVertexDistance;
 in float cylindricalVertexDistance;
@@ -66,9 +68,38 @@ ivec2 snappedTexelCoord(vec2 uv, ivec2 texSize) {
     return ivec2(clamp(texel, vec2(0.0), vec2(texSize) - 1.0));
 }
 
-float fetchHeight(ivec2 texelXY, ivec2 texSize, ivec2 offset) {
-    ivec2 sampleXY = clamp(texelXY + offset, ivec2(0), texSize - 1);
-    return texelFetch(Sampler0, sampleXY, 0).a;
+vec3 decodeNormal(vec4 encoded) {
+    return normalize(encoded.xyz * 2.0 - 1.0);
+}
+
+vec3 axisAlignedNormal(vec3 normal) {
+    vec3 absNormal = abs(normal);
+    if (absNormal.x > absNormal.y && absNormal.x > absNormal.z) {
+        return vec3(sign(normal.x), 0.0, 0.0);
+    }
+    if (absNormal.y > absNormal.z) {
+        return vec3(0.0, sign(normal.y), 0.0);
+    }
+    return vec3(0.0, 0.0, sign(normal.z));
+}
+
+mat3 faceTbn(vec3 faceNormal) {
+    if (faceNormal.y > 0.5) {
+        return mat3(vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, -1.0), vec3(0.0, 1.0, 0.0));
+    }
+    if (faceNormal.y < -0.5) {
+        return mat3(vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0), vec3(0.0, -1.0, 0.0));
+    }
+    if (faceNormal.z < -0.5) {
+        return mat3(vec3(1.0, 0.0, 0.0), vec3(0.0, -1.0, 0.0), vec3(0.0, 0.0, -1.0));
+    }
+    if (faceNormal.z > 0.5) {
+        return mat3(vec3(-1.0, 0.0, 0.0), vec3(0.0, -1.0, 0.0), vec3(0.0, 0.0, 1.0));
+    }
+    if (faceNormal.x > 0.5) {
+        return mat3(vec3(0.0, 0.0, 1.0), vec3(0.0, -1.0, 0.0), vec3(1.0, 0.0, 0.0));
+    }
+    return mat3(vec3(0.0, 0.0, -1.0), vec3(0.0, -1.0, 0.0), vec3(-1.0, 0.0, 0.0));
 }
 
 void main() {
@@ -83,32 +114,15 @@ void main() {
 #endif
 
     vec4 color;
+    int materialId = int(round(vertexColor.a * 255.0));
 
-    if (texColor.a < 0.9999) {
-        // --- Texturall block: per-pixel normal-mapped lighting ---
-
-
+    if (materialId > 0 && materialId < 5) {
+        vec3 faceNormal = axisAlignedNormal(normalize(cross(dFdx(v_worldPos), dFdy(v_worldPos))));
         ivec2 texSize = textureSize(Sampler0, 0);
-        ivec2 texelXY = snappedTexelCoord(texCoord0, texSize);
-        float hL = fetchHeight(texelXY, texSize, ivec2(-1,  0));
-        float hR = fetchHeight(texelXY, texSize, ivec2( 1,  0));
-        float hU = fetchHeight(texelXY, texSize, ivec2( 0, -1));
-        float hD = fetchHeight(texelXY, texSize, ivec2( 0,  1));
-
-        vec3 tsNormal = normalize(vec3((hL - hR) * NORMAL_STRENGTH,
-                                       (hU - hD) * NORMAL_STRENGTH,
-                                       1.0));
-
-        vec3 N   = normalize(cross(dFdx(v_worldPos), dFdy(v_worldPos)));
-        vec3 dp1 = dFdx(v_worldPos);
-        vec3 dp2 = dFdy(v_worldPos);
-        vec2 duv1 = dFdx(texCoord0);
-        vec2 duv2 = dFdy(texCoord0);
-        float det = duv1.x * duv2.y - duv1.y * duv2.x;
-        vec3 T = normalize((dp1 * duv2.y - dp2 * duv1.y) / det);
-        vec3 B = normalize(cross(N, T));
-
-        vec3 worldNormal = normalize(mat3(T, B, N) * tsNormal);
+        ivec2 normalTexel = snappedTexelCoord(texCoord0, texSize);
+        vec3 tsNormal = decodeNormal(texelFetch(Sampler0, normalTexel, 0));
+        vec3 worldNormal = normalize(faceTbn(faceNormal) * tsNormal);
+        float sunDot = max(dot(worldNormal, normalize(SunDirection)), 0.0);
 
         vec2 uvBase = clamp(v_lightUV / 256.0 + 0.5 / 16.0, vec2(0.5 / 16.0), vec2(15.5 / 16.0));
         vec3 skyLight = texture(Sampler2, vec2(0.5 / 16.0, uvBase.y)).rgb;

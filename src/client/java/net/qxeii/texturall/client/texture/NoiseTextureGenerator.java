@@ -42,9 +42,6 @@ public final class NoiseTextureGenerator implements ProceduralTextureGenerator {
         }
     }
 
-    // Height is packed into the alpha channel so the block.fsh can read it
-    // for per-pixel normal computation. Alpha is kept strictly < 1.0 so the
-    // shader can distinguish our blocks from vanilla solid blocks (alpha == 1.0).
     private int samplePalette(double value) {
         double scaled = value * (palette.length - 1);
         int lowerIndex = (int) Math.floor(scaled);
@@ -55,7 +52,7 @@ public final class NoiseTextureGenerator implements ProceduralTextureGenerator {
         int red   = lerp(lower[0], upper[0], t);
         int green = lerp(lower[1], upper[1], t);
         int blue  = lerp(lower[2], upper[2], t);
-        int alpha = (int) (value * 254.0); // max 254 (0xFE) keeps alpha < 1.0
+        int alpha = 0xFF;
         return (alpha << 24) | (red << 16) | (green << 8) | blue;
     }
 

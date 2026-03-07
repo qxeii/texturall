@@ -1,42 +1,51 @@
 package net.qxeii.texturall.client;
 
-import net.minecraft.client.gl.ShaderProgram;
-import org.lwjgl.opengl.GL11;
-import org.lwjgl.opengl.GL20;
+import com.mojang.blaze3d.buffers.GpuBuffer;
+import com.mojang.blaze3d.buffers.GpuBufferSlice;
+import com.mojang.blaze3d.buffers.Std140Builder;
+import com.mojang.blaze3d.systems.RenderSystem;
+import org.lwjgl.system.MemoryStack;
 
-public class SunDirectionUniform {
+public final class SunDirectionUniform {
+    private static final int SIZE = 16;
 
-    private static int blockShaderGlRef = -1;
-    private static int uniformLocation  = -1;
+    private static GpuBuffer buffer;
+    private static GpuBufferSlice slice;
 
-    /**
-     * Called for every newly created ShaderProgram. Captures this program if it
-     * contains our custom uniform (i.e. it is our overridden block shader).
-     */
-    public static void tryCapture(ShaderProgram program) {
-        int glRef = program.getGlRef();
-        int loc   = GL20.glGetUniformLocation(glRef, "u_sunDirection");
-        if (loc >= 0) {
-            blockShaderGlRef = glRef;
-            uniformLocation  = loc;
+    private SunDirectionUniform() {
+    }
+
+    public static void upload(float sunAngle) {
+        ensureBuffer();
+
+        float x = (float) -Math.sin(sunAngle);
+        float y = (float) Math.cos(sunAngle);
+
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            var data = Std140Builder.onStack(stack, SIZE)
+                .putVec3(x, y, 0.0F)
+                .get();
+            RenderSystem.getDevice()
+                .createCommandEncoder()
+                .writeToBuffer(buffer.slice(), data);
         }
     }
 
-    /**
-     * Upload the sun direction derived from {@code sunAngle} (radians, from
-     * {@code WorldRenderState.skyRenderState.sunAngle}). Called once per frame.
-     * Sun rises in the east (+X), is overhead at noon (+Y), sets in west (-X).
-     */
-    public static void upload(float sunAngle) {
-        if (uniformLocation < 0) return;
+    public static GpuBufferSlice slice() {
+        ensureBuffer();
+        return slice;
+    }
 
-        float x = (float) Math.cos(sunAngle);
-        float y = (float) Math.sin(sunAngle);
+    private static void ensureBuffer() {
+        if (buffer != null && !buffer.isClosed()) {
+            return;
+        }
 
-        // Upload without requiring the block shader to be currently bound.
-        int prev = GL11.glGetInteger(GL20.GL_CURRENT_PROGRAM);
-        GL20.glUseProgram(blockShaderGlRef);
-        GL20.glUniform3f(uniformLocation, x, y, 0.0f);
-        GL20.glUseProgram(prev);
+        buffer = RenderSystem.getDevice().createBuffer(
+            () -> "Texturall Sun Direction",
+            GpuBuffer.USAGE_UNIFORM | GpuBuffer.USAGE_COPY_DST,
+            SIZE
+        );
+        slice = buffer.slice();
     }
 }

@@ -10,6 +10,8 @@ import java.util.Map;
 public final class TexturallTextureOverrides {
     private static boolean bootstrapped;
     private static final Map<Block, WorldAlignedTextureMaterial> MATERIALS = new HashMap<>();
+    private static final Map<Integer, Identifier> NORMAL_TEXTURES = new HashMap<>();
+    private static int nextMaterialIndex = 1;
 
     private TexturallTextureOverrides() {
     }
@@ -55,22 +57,34 @@ public final class TexturallTextureOverrides {
         return MATERIALS.get(block);
     }
 
+    public static Identifier normalTextureForIndex(int materialIndex) {
+        return NORMAL_TEXTURES.get(materialIndex);
+    }
+
     private static void registerVanillaBlock(Block block, String name, long seed, double scale, int[][] palette) {
         Identifier tileId = Identifier.ofVanilla("textures/block/" + name + ".png");
         Identifier sheetResourceId = Identifier.ofVanilla("textures/block/world/" + name + "_sheet.png");
         Identifier sheetSpriteId = Identifier.ofVanilla("block/world/" + name + "_sheet");
+        Identifier normalTextureResourceId = Identifier.ofVanilla("textures/block/world/" + name + "_normal.png");
+        Identifier normalSpriteId = Identifier.ofVanilla("block/world/" + name + "_normal");
+        int materialIndex = nextMaterialIndex++;
 
         ProceduralTextureRegistry.register(
             tileId,
             new NoiseTextureGenerator(16, seed, scale, palette)
         );
         ProceduralTextureRegistry.register(sheetResourceId, new NoiseTextureGenerator(256, seed, scale, palette));
+        ProceduralTextureRegistry.register(normalTextureResourceId, new NormalTextureGenerator(256, seed, scale));
+        NORMAL_TEXTURES.put(materialIndex, normalTextureResourceId);
 
         MATERIALS.put(block, new WorldAlignedTextureMaterial(
             block,
             tileId,
             sheetResourceId,
             sheetSpriteId,
+            normalTextureResourceId,
+            normalSpriteId,
+            materialIndex,
             seed,
             scale,
             palette,
