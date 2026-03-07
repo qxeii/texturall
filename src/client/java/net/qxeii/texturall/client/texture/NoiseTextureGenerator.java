@@ -6,7 +6,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
 public final class NoiseTextureGenerator implements ProceduralTextureGenerator {
-    private static final double DETAIL_WEIGHT = 0.45;
     private static final double CONTRAST = 2.35;
     private static final double CRACK_DARKENING = 0.28;
 
@@ -14,18 +13,19 @@ public final class NoiseTextureGenerator implements ProceduralTextureGenerator {
     private final int[] palette;
     private final SeamlessNoiseField noiseField;
 
-    public NoiseTextureGenerator(int size, long seed, double scale, int[] palette) {
+    public NoiseTextureGenerator(int size, long seed, MaterialNoiseSettings noiseSettings, int[] palette) {
         this.size = size;
         this.palette = palette;
-        this.noiseField = new SeamlessNoiseField(size, seed, scale);
+        this.noiseField = new SeamlessNoiseField(size, seed, noiseSettings);
     }
 
     @Override
     public byte[] generatePng() {
         BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        double[] variation = sampleVariationField();
         for (int y = 0; y < size; y++) {
             for (int x = 0; x < size; x++) {
-                image.setRGB(x, y, samplePalette(sampleColorVariation(x, y)));
+                image.setRGB(x, y, samplePalette(variation[(y * size) + x]));
             }
         }
 
@@ -35,6 +35,23 @@ public final class NoiseTextureGenerator implements ProceduralTextureGenerator {
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to encode generated texture", exception);
         }
+    }
+
+    private double[] sampleVariationField() {
+        double[] values = new double[size * size];
+        double total = 0.0;
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                double value = sampleColorVariation(x, y);
+                values[(y * size) + x] = value;
+                total += value;
+            }
+        }
+        double bias = 0.5 - (total / values.length);
+        for (int i = 0; i < values.length; i++) {
+            values[i] = clamp01(values[i] + bias);
+        }
+        return values;
     }
 
     private int samplePalette(double value) {
@@ -57,18 +74,13 @@ public final class NoiseTextureGenerator implements ProceduralTextureGenerator {
 
     private double sampleColorVariation(int pixelX, int pixelY) {
         double base = sample(pixelX, pixelY);
-        double detail = sample(pixelX * 10, pixelY * 10);
         double crackMask = noiseField.sampleCrackMask(pixelX, pixelY);
-        return applyContrast(mix(base, detail, DETAIL_WEIGHT) - crackMask * CRACK_DARKENING);
+        return applyContrast(base - crackMask * CRACK_DARKENING);
     }
 
     private static double applyContrast(double value) {
         double centered = (clamp01(value) - 0.5) * CONTRAST + 0.5;
         return clamp01(centered);
-    }
-
-    private static double mix(double start, double end, double t) {
-        return start + (end - start) * t;
     }
 
     private static double clamp01(double value) {

@@ -15,7 +15,7 @@ public record WorldAlignedTextureMaterial(
     Identifier normalSpriteId,
     int materialIndex,
     long seed,
-    double scale,
+    MaterialNoiseSettings noiseSettings,
     int[] palette,
     int sheetSize
 ) {

@@ -25,17 +25,21 @@ public final class TexturallTextureOverrides {
 
         bootstrapped = true;
 
-        registerVanillaBlock(Blocks.STONE, "stone", "stone", 0x51A2D39CB53F7E1DL, 4.25, "stone");
-        registerVanillaBlock(Blocks.GRANITE, "granite", "granite", 0xA9B5F2C43E8D16F1L, 4.0, "granite");
-        registerVanillaBlock(Blocks.DIORITE, "diorite", "diorite", 0xC74E19A25D30B86FL, 4.6, "diorite");
-        registerVanillaBlock(Blocks.ANDESITE, "andesite", "andesite", 0x67BF6E0C11E2B7A4L, 4.5, "andesite");
-        registerVanillaBlock(Blocks.DEEPSLATE, "deepslate", "deepslate", 0x2D4A57A9B13ED0F1L, 3.75, "deepslate", "deepslate_top");
-        registerVanillaBlock(Blocks.TUFF, "tuff", "tuff", 0x4B0F92AD73CE1183L, 4.0, "tuff");
-        registerVanillaBlock(Blocks.CALCITE, "calcite", "calcite", 0x9D73E1045CB2AF67L, 5.1, "calcite");
-        registerVanillaBlock(Blocks.DRIPSTONE_BLOCK, "dripstone_block", "dripstone_block", 0x5D1F94C83E24A771L, 4.2, "dripstone_block");
-        registerVanillaBlock(Blocks.BASALT, "basalt", "basalt_side", 0xE3A1C6704FB2DD19L, 3.8, "basalt_side", "basalt_top");
-        registerVanillaBlock(Blocks.SMOOTH_BASALT, "smooth_basalt", "smooth_basalt", 0x13D4AF5E78C920B3L, 3.6, "smooth_basalt");
-        registerVanillaBlock(Blocks.BLACKSTONE, "blackstone", "blackstone", 0x7EB19A0D54F28361L, 3.9, "blackstone", "blackstone_top");
+        registerVanillaBlock(Blocks.STONE, "stone", "stone", 0x51A2D39CB53F7E1DL, noise(4.25, 1.0, 5.0, 1.0), "stone");
+        registerVanillaBlock(Blocks.COBBLESTONE, "cobblestone", "cobblestone", 0xD9278A61B43C1FF2L, noise(0.45, 1.0, 1.0, 1.0), "cobblestone");
+        registerVanillaBlock(Blocks.MOSSY_COBBLESTONE, "mossy_cobblestone", "mossy_cobblestone", 0x82FAE19D03C44D71L, noise(0.45, 1.0, 1.0, 1.0), "mossy_cobblestone");
+        registerVanillaBlock(Blocks.GRAVEL, "gravel", "gravel", 0x3CC8B210DD5AE5F4L, noise(2.5, 1.0, 1.0, 2.0), "gravel");
+        registerVanillaBlock(Blocks.GRANITE, "granite", "granite", 0xA9B5F2C43E8D16F1L, noise(4.0, 1.05, 0.95, 0.8), "granite");
+        registerVanillaBlock(Blocks.DIORITE, "diorite", "diorite", 0xC74E19A25D30B86FL, noise(4.6, 1.0, 1.0, 0.45), "diorite");
+        registerVanillaBlock(Blocks.ANDESITE, "andesite", "andesite", 0x67BF6E0C11E2B7A4L, noise(4.5, 1.0, 1.0, 0.85), "andesite");
+        registerVanillaBlock(Blocks.DEEPSLATE, "deepslate", "deepslate", 0x2D4A57A9B13ED0F1L, noise(4.5, 2.5, 1.0, 2.0), "deepslate", "deepslate_top");
+        registerVanillaBlock(Blocks.COBBLED_DEEPSLATE, "cobbled_deepslate", "cobbled_deepslate", 0xF4DA07E26C1917A2L, noise(4.0, 0.9, 1.2, 1.2), "cobbled_deepslate");
+        registerVanillaBlock(Blocks.TUFF, "tuff", "tuff", 0x4B0F92AD73CE1183L, noise(4.0, 1.0, 1.0, 0.75), "tuff");
+        registerVanillaBlock(Blocks.CALCITE, "calcite", "calcite", 0x9D73E1045CB2AF67L, noise(5.1, 1.0, 1.0, 0.25), "calcite");
+        registerVanillaBlock(Blocks.DRIPSTONE_BLOCK, "dripstone_block", "dripstone_block", 0x5D1F94C83E24A771L, noise(4.2, 0.9, 1.2, 1.05), "dripstone_block");
+        registerVanillaBlock(Blocks.BASALT, "basalt", "basalt_side", 0xE3A1C6704FB2DD19L, noise(4.8, 0.55, 1.7, 0.55), "basalt_side", "basalt_top");
+        registerVanillaBlock(Blocks.SMOOTH_BASALT, "smooth_basalt", "smooth_basalt", 0x13D4AF5E78C920B3L, noise(5.0, 0.6, 1.55, 0.3), "smooth_basalt");
+        registerVanillaBlock(Blocks.BLACKSTONE, "blackstone", "blackstone", 0x7EB19A0D54F28361L, noise(3.9, 0.95, 1.05, 1.15), "blackstone", "blackstone_top");
 
         ProceduralTextureRegistry.register(MATERIAL_SHADER_INCLUDE_ID, new TexturallMaterialShaderGenerator(MATERIALS.values()));
     }
@@ -53,7 +57,7 @@ public final class TexturallTextureOverrides {
         String name,
         String spriteName,
         long seed,
-        double scale,
+        MaterialNoiseSettings noiseSettings,
         String... paletteTextureNames
     ) {
         Identifier tileId = Identifier.ofVanilla("textures/block/" + spriteName + ".png");
@@ -71,10 +75,10 @@ public final class TexturallTextureOverrides {
 
         ProceduralTextureRegistry.register(
             tileId,
-            new NoiseTextureGenerator(16, seed, scale, palette)
+            new NoiseTextureGenerator(16, seed, noiseSettings, palette)
         );
-        ProceduralTextureRegistry.register(sheetResourceId, new NoiseTextureGenerator(256, seed, scale, palette));
-        ProceduralTextureRegistry.register(normalTextureResourceId, new NormalTextureGenerator(256, seed, scale));
+        ProceduralTextureRegistry.register(sheetResourceId, new NoiseTextureGenerator(256, seed, noiseSettings, palette));
+        ProceduralTextureRegistry.register(normalTextureResourceId, new NormalTextureGenerator(256, seed, noiseSettings));
         NORMAL_TEXTURES.put(materialIndex, normalTextureResourceId);
 
         MATERIALS.put(block, new WorldAlignedTextureMaterial(
@@ -87,9 +91,13 @@ public final class TexturallTextureOverrides {
             normalSpriteId,
             materialIndex,
             seed,
-            scale,
+            noiseSettings,
             palette,
             16
         ));
+    }
+
+    private static MaterialNoiseSettings noise(double scale, double squashX, double squashY, double crackDensity) {
+        return new MaterialNoiseSettings(scale, squashX, squashY, crackDensity);
     }
 }
