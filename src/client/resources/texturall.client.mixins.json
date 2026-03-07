@@ -6,7 +6,8 @@
   "client": [
     "NamespaceResourceManagerMixin",
     "RenderLayerMixin",
-    "RenderPipelineMixin"
+    "SectionRenderStateMixin",
+    "WorldRendererAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

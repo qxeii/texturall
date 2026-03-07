@@ -1,7 +1,7 @@
 package net.qxeii.texturall.mixin.client;
 
-import com.llamalad7.mixinextras.sugar.Local;
-import com.mojang.blaze3d.systems.RenderPass;
+import com.mojang.blaze3d.buffers.GpuBufferSlice;
+import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.render.BuiltBuffer;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.util.Identifier;
@@ -15,17 +15,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class RenderLayerMixin {
     private static final Identifier TERRAIN_SHADER = Identifier.ofVanilla("core/terrain");
 
-    @Inject(
-        method = "draw",
-        at = @At(
-            value = "INVOKE",
-            target = "Lcom/mojang/blaze3d/systems/RenderPass;setIndexBuffer(Lcom/mojang/blaze3d/buffers/GpuBuffer;Lcom/mojang/blaze3d/vertex/VertexFormat$IndexType;)V"
-        )
-    )
-    private void texturall$bindSunDirection(BuiltBuffer buffer, CallbackInfo ci, @Local RenderPass renderPass) {
+    @Inject(method = "draw", at = @At("HEAD"))
+    private void texturall$bindSunDirection(BuiltBuffer buffer, CallbackInfo ci) {
         RenderLayer self = (RenderLayer) (Object) this;
         if (self.getRenderPipeline().getFragmentShader().equals(TERRAIN_SHADER)) {
-            renderPass.setUniform("SunDirectionInfo", SunDirectionUniform.slice());
+            GpuBufferSlice sunDirection = SunDirectionUniform.upload();
+            if (sunDirection != null) {
+                RenderSystem.setShaderLights(sunDirection);
+            }
         }
     }
 }

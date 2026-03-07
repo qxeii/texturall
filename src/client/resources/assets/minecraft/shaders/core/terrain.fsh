@@ -2,23 +2,17 @@
 
 #moj_import <minecraft:fog.glsl>
 #moj_import <minecraft:globals.glsl>
+#moj_import <minecraft:light.glsl>
 #moj_import <minecraft:chunksection.glsl>
 
 uniform sampler2D Sampler0;
-uniform sampler2D Sampler2;
-
-const float AMBIENT       = 0.0;
-
-layout(std140) uniform SunDirectionInfo {
-    vec3 SunDirection;
-};
 
 in float sphericalVertexDistance;
 in float cylindricalVertexDistance;
 in vec4 vertexColor;
 in vec2 texCoord0;
 in vec3 v_worldPos;
-in vec2 v_lightUV;
+in vec3 v_faceNormal;
 
 out vec4 fragColor;
 
@@ -117,20 +111,20 @@ void main() {
     int materialId = int(round(vertexColor.a * 255.0));
 
     if (materialId > 0 && materialId < 5) {
-        vec3 faceNormal = axisAlignedNormal(normalize(cross(dFdx(v_worldPos), dFdy(v_worldPos))));
+        vec3 faceNormal = axisAlignedNormal(normalize(v_faceNormal));
         ivec2 texSize = textureSize(Sampler0, 0);
         ivec2 normalTexel = snappedTexelCoord(texCoord0, texSize);
         vec3 tsNormal = decodeNormal(texelFetch(Sampler0, normalTexel, 0));
         vec3 worldNormal = normalize(faceTbn(faceNormal) * tsNormal);
-        float sunDot = max(dot(worldNormal, normalize(SunDirection)), 0.0);
-
-        vec2 uvBase = clamp(v_lightUV / 256.0 + 0.5 / 16.0, vec2(0.5 / 16.0), vec2(15.5 / 16.0));
-        vec3 skyLight = texture(Sampler2, vec2(0.5 / 16.0, uvBase.y)).rgb;
-        vec3 blockLight = texture(Sampler2, vec2(uvBase.x, 0.5 / 16.0)).rgb;
-
-        vec3 skyContribution = skyLight * (sunDot * (1.0 - AMBIENT) + AMBIENT);
-        vec3 totalLight = clamp(skyContribution + blockLight, 0.0, 1.0);
-        color = vec4(totalLight, 1.0);
+        vec3 sunDirection = Light0_Direction;
+        float sunDirectionLengthSquared = dot(sunDirection, sunDirection);
+        if (sunDirectionLengthSquared > 1.0e-6) {
+            sunDirection *= inversesqrt(sunDirectionLengthSquared);
+        } else {
+            sunDirection = vec3(0.0, 1.0, 0.0);
+        }
+        float sunShade = clamp(dot(worldNormal, sunDirection) * 0.5 + 0.5, 0.0, 1.0);
+        color = vec4(vertexColor.rgb * sunShade, 1.0);
     } else {
         // --- Vanilla block: unchanged ---
         color = texColor * vertexColor;

@@ -18,7 +18,7 @@ out float cylindricalVertexDistance;
 out vec4 vertexColor;
 out vec2 texCoord0;
 out vec3 v_worldPos;
-out vec2 v_lightUV;
+out vec3 v_faceNormal;
 
 vec4 minecraft_sample_lightmap(sampler2D lightMap, ivec2 uv) {
     return texture(lightMap, clamp((uv / 256.0) + 0.5 / 16.0, vec2(0.5 / 16.0), vec2(15.5 / 16.0)));
@@ -33,5 +33,5 @@ void main() {
     vertexColor = Color * minecraft_sample_lightmap(Sampler2, UV2);
     texCoord0 = UV0;
     v_worldPos = pos;
-    v_lightUV = vec2(UV2);
+    v_faceNormal = Normal;
 }
