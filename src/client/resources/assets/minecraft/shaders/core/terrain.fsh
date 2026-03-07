@@ -14,7 +14,6 @@ in vec4 vertexColor;
 in vec2 texCoord0;
 in vec4 v_baseColor;
 in vec2 v_lightUv;
-in vec3 v_worldPos;
 in vec3 v_faceNormal;
 
 out vec4 fragColor;
@@ -77,6 +76,10 @@ vec3 normalizeOr(vec3 direction, vec3 fallback) {
     return fallback;
 }
 
+vec3 decodeDirection(vec3 encoded, vec3 fallback) {
+    return normalizeOr(encoded * 2.0 - 1.0, fallback);
+}
+
 float horizonFade(vec3 lightDirection) {
     return smoothstep(0.0, 0.25, lightDirection.y);
 }
@@ -89,6 +92,38 @@ const float LIGHTMAP_MIN = 0.5 / 16.0;
 
 vec3 sampleLightmapAxis(vec2 uv) {
     return texture(Sampler2, clamp(uv, vec2(LIGHTMAP_MIN), vec2(15.5 / 16.0))).rgb;
+}
+
+vec3 materialMinDirectionalColor(int materialId) {
+    if (materialId == 1) {
+        return vec3(56.0, 59.0, 63.0) / 255.0;
+    }
+    if (materialId == 2) {
+        return vec3(42.0, 44.0, 48.0) / 255.0;
+    }
+    if (materialId == 3) {
+        return vec3(84.0, 84.0, 86.0) / 255.0;
+    }
+    if (materialId == 4) {
+        return vec3(79.0, 84.0, 76.0) / 255.0;
+    }
+    return vec3(0.0);
+}
+
+vec3 materialMaxDirectionalColor(int materialId) {
+    if (materialId == 1) {
+        return vec3(140.0, 145.0, 151.0) / 255.0;
+    }
+    if (materialId == 2) {
+        return vec3(108.0, 112.0, 119.0) / 255.0;
+    }
+    if (materialId == 3) {
+        return vec3(171.0, 171.0, 173.0) / 255.0;
+    }
+    if (materialId == 4) {
+        return vec3(160.0, 167.0, 151.0) / 255.0;
+    }
+    return vec3(1.0);
 }
 
 vec3 axisAlignedNormal(vec3 normal) {
@@ -134,6 +169,7 @@ void main() {
 
     vec4 color;
     int materialId = int(round(v_baseColor.a * 255.0));
+    vec3 lightFloor = sampleLightmapAxis(vec2(LIGHTMAP_MIN));
 
     if (materialId > 0 && materialId < 5) {
         vec3 faceNormal = axisAlignedNormal(normalize(v_faceNormal));
@@ -145,23 +181,26 @@ void main() {
 
         vec3 sunDirection = normalizeOr(Light0_Direction, vec3(0.0, 1.0, 0.0));
         vec3 moonDirection = normalizeOr(Light1_Direction, -sunDirection);
+        vec3 blockDirection = decodeDirection(v_baseColor.rgb, faceNormal);
+        vec3 minDirectionalColor = materialMinDirectionalColor(materialId);
+        vec3 maxDirectionalColor = materialMaxDirectionalColor(materialId);
 
         float sunShade = lambert(worldNormal, sunDirection) * horizonFade(sunDirection);
         float moonShade = lambert(worldNormal, moonDirection) * horizonFade(moonDirection);
-
-        vec3 lightFloor = sampleLightmapAxis(vec2(LIGHTMAP_MIN));
+        float skyShade = clamp(sunShade + moonShade, 0.0, 1.0);
         vec3 skyLight = max(sampleLightmapAxis(vec2(LIGHTMAP_MIN, v_lightUv.y)) - lightFloor, vec3(0.0));
         vec3 blockLight = max(sampleLightmapAxis(vec2(v_lightUv.x, LIGHTMAP_MIN)) - lightFloor, vec3(0.0));
 
-        // The lightmap does not expose local block-light vectors, so use a stable face-local key direction.
-        vec3 blockDirection = normalize(tbn * normalize(vec3(0.35, 0.45, 0.82)));
-        float blockShade = clamp(dot(worldNormal, blockDirection) * 0.35 + 0.65, 0.0, 1.0);
+        float blockShade = lambert(worldNormal, blockDirection);
+        vec3 skyDirectionalColor = mix(minDirectionalColor, maxDirectionalColor, skyShade);
+        vec3 blockDirectionalColor = mix(minDirectionalColor, maxDirectionalColor, blockShade);
 
-        vec3 lighting = skyLight * max(sunShade, moonShade) + blockLight * blockShade;
-        color = vec4(v_baseColor.rgb * lighting, 1.0);
+        vec3 lighting = skyLight * skyDirectionalColor + blockLight * blockDirectionalColor;
+        color = vec4(lighting, 1.0);
     } else {
         // --- Vanilla block: unchanged ---
-        color = texColor * vertexColor;
+        vec3 vanillaLight = max(texture(Sampler2, v_lightUv).rgb - lightFloor, vec3(0.0));
+        color = vec4(texColor.rgb * v_baseColor.rgb * vanillaLight, texColor.a * v_baseColor.a);
     }
 
     color = mix(FogColor * vec4(1.0, 1.0, 1.0, color.a), color, ChunkVisibility);

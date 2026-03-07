@@ -16,6 +16,8 @@ public record WorldAlignedTextureMaterial(
     long seed,
     double scale,
     int[][] palette,
+    int[] minDirectionalColor,
+    int[] maxDirectionalColor,
     int sheetSize
 ) {
     public SpriteIdentifier spriteId() {

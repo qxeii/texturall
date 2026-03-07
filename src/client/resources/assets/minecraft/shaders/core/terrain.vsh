@@ -19,12 +19,7 @@ out vec4 vertexColor;
 out vec2 texCoord0;
 out vec4 v_baseColor;
 out vec2 v_lightUv;
-out vec3 v_worldPos;
 out vec3 v_faceNormal;
-
-vec4 minecraft_sample_lightmap(sampler2D lightMap, ivec2 uv) {
-    return texture(lightMap, clamp((uv / 256.0) + 0.5 / 16.0, vec2(0.5 / 16.0), vec2(15.5 / 16.0)));
-}
 
 void main() {
     vec3 pos = Position + (ChunkPosition - CameraBlockPos) + CameraOffset;
@@ -37,6 +32,5 @@ void main() {
     texCoord0 = UV0;
     v_baseColor = Color;
     v_lightUv = lightUv;
-    v_worldPos = pos;
     v_faceNormal = Normal;
 }

@@ -4,14 +4,17 @@ import net.fabricmc.fabric.api.renderer.v1.mesh.MutableQuadView;
 import net.fabricmc.fabric.api.renderer.v1.mesh.QuadEmitter;
 import net.fabricmc.fabric.api.renderer.v1.mesh.ShadeMode;
 import net.fabricmc.fabric.api.renderer.v1.model.FabricBlockStateModel;
+import net.fabricmc.fabric.api.util.TriState;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.render.LightmapTextureManager;
 import net.minecraft.client.render.model.BlockModelPart;
 import net.minecraft.client.render.model.BlockStateModel;
 import net.minecraft.client.texture.Sprite;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.random.Random;
+import net.minecraft.world.LightType;
 import net.minecraft.world.BlockRenderView;
 import org.jspecify.annotations.Nullable;
 
@@ -19,8 +22,6 @@ import java.util.List;
 import java.util.function.Predicate;
 
 public final class WorldAlignedBlockStateModel implements BlockStateModel, FabricBlockStateModel {
-    private static final int WHITE = 0xFFFFFFFF;
-
     private final BlockStateModel delegate;
     private final WorldAlignedTextureMaterial mat;
 
@@ -57,36 +58,108 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
             if (cullTest.test(face)) {
                 continue;
             }
-            emitCanonicalFace(emitter, pos, face);
+            emitCanonicalFace(emitter, blockView, pos, face);
         }
     }
 
     @Override
     public @Nullable Object createGeometryKey(BlockRenderView blockView, BlockPos pos, BlockState state, Random random) {
+        int lightSignature = 1;
+        for (Direction face : Direction.values()) {
+            lightSignature = 31 * lightSignature + encodeBlockLightDirection(blockView, pos, face);
+            lightSignature = 31 * lightSignature + faceLightmap(blockView, pos, face);
+        }
+
         return new GeometryKey(
             delegate.getClass(),
-            Math.floorMod(pos.getX(), mat.sheetSize()),
-            Math.floorMod(pos.getY(), mat.sheetSize()),
-            Math.floorMod(pos.getZ(), mat.sheetSize())
+            pos.getX(),
+            pos.getY(),
+            pos.getZ(),
+            lightSignature
         );
     }
 
-    private void emitCanonicalFace(QuadEmitter emitter, BlockPos pos, Direction face) {
+    private void emitCanonicalFace(QuadEmitter emitter, BlockRenderView blockView, BlockPos pos, Direction face) {
         emitter.nominalFace(face);
         emitter.cullFace(face);
-        // Disable Indigo's baked directional shading so vertex colors carry only
-        // the lightmap value. block.fsh applies per-pixel directional shading instead.
+        // Disable Indigo's baked directional shading and AO so the shader sees one face-level
+        // light sample plus the packed block-light direction payload.
         emitter.diffuseShade(false);
+        emitter.ambientOcclusion(TriState.FALSE);
         emitter.shadeMode(ShadeMode.VANILLA);
         writeFacePositions(emitter, face);
-        int materialMarker = 0x00FFFFFF | (mat.materialIndex() << 24);
+        int materialMarker = encodeBlockLightDirection(blockView, pos, face);
         emitter.color(0, materialMarker);
         emitter.color(1, materialMarker);
         emitter.color(2, materialMarker);
         emitter.color(3, materialMarker);
+        int faceLight = faceLightmap(blockView, pos, face);
+        emitter.lightmap(faceLight, faceLight, faceLight, faceLight);
         remapUv(emitter, pos, face);
         emitter.spriteBake(sheetSprite(), MutableQuadView.BAKE_NORMALIZED);
         emitter.emit();
+    }
+
+    private int encodeBlockLightDirection(BlockRenderView blockView, BlockPos pos, Direction face) {
+        int sampleX = pos.getX() + face.getOffsetX();
+        int sampleY = pos.getY() + face.getOffsetY();
+        int sampleZ = pos.getZ() + face.getOffsetZ();
+        BlockPos.Mutable mutable = new BlockPos.Mutable();
+
+        float x = sampleBlockLight(blockView, mutable, sampleX + 1, sampleY, sampleZ)
+            - sampleBlockLight(blockView, mutable, sampleX - 1, sampleY, sampleZ);
+        float y = sampleBlockLight(blockView, mutable, sampleX, sampleY + 1, sampleZ)
+            - sampleBlockLight(blockView, mutable, sampleX, sampleY - 1, sampleZ);
+        float z = sampleBlockLight(blockView, mutable, sampleX, sampleY, sampleZ + 1)
+            - sampleBlockLight(blockView, mutable, sampleX, sampleY, sampleZ - 1);
+
+        float normalBias = sampleBlockLight(blockView, mutable, sampleX, sampleY, sampleZ) * 0.35F;
+        x += face.getOffsetX() * normalBias;
+        y += face.getOffsetY() * normalBias;
+        z += face.getOffsetZ() * normalBias;
+
+        float lengthSquared = x * x + y * y + z * z;
+        if (lengthSquared > 1.0e-6F) {
+            float invLength = (float) (1.0 / Math.sqrt(lengthSquared));
+            x *= invLength;
+            y *= invLength;
+            z *= invLength;
+        } else {
+            x = face.getOffsetX();
+            y = face.getOffsetY();
+            z = face.getOffsetZ();
+        }
+
+        return (mat.materialIndex() << 24)
+            | (encodeUnitChannel(x) << 16)
+            | (encodeUnitChannel(y) << 8)
+            | encodeUnitChannel(z);
+    }
+
+    private static int sampleBlockLight(BlockRenderView blockView, BlockPos.Mutable mutable, int x, int y, int z) {
+        return sampleLight(blockView, mutable, LightType.BLOCK, x, y, z);
+    }
+
+    private static int sampleLight(BlockRenderView blockView, BlockPos.Mutable mutable, LightType lightType, int x, int y, int z) {
+        mutable.set(x, y, z);
+        return blockView.getLightLevel(lightType, mutable);
+    }
+
+    private static int encodeUnitChannel(float value) {
+        float normalized = value * 0.5F + 0.5F;
+        if (normalized < 0.0F) {
+            normalized = 0.0F;
+        } else if (normalized > 1.0F) {
+            normalized = 1.0F;
+        }
+        return Math.round(normalized * 255.0F);
+    }
+
+    private static int faceLightmap(BlockRenderView blockView, BlockPos pos, Direction face) {
+        BlockPos samplePos = pos.offset(face);
+        int blockLight = blockView.getLightLevel(LightType.BLOCK, samplePos);
+        int skyLight = blockView.getLightLevel(LightType.SKY, samplePos);
+        return LightmapTextureManager.pack(blockLight, skyLight);
     }
 
     private void remapUv(MutableQuadView quad, BlockPos pos, Direction face) {
@@ -175,6 +248,6 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         return MinecraftClient.getInstance().getAtlasManager().getSprite(mat.spriteId());
     }
 
-    private record GeometryKey(Class<?> delegateType, int x, int y, int z) {
+    private record GeometryKey(Class<?> delegateType, int x, int y, int z, int lightSignature) {
     }
 }
