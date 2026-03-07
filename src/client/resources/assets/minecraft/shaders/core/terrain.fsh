@@ -94,6 +94,10 @@ vec3 sampleLightmapAxis(vec2 uv) {
     return texture(Sampler2, clamp(uv, vec2(LIGHTMAP_MIN), vec2(15.5 / 16.0))).rgb;
 }
 
+float maxComponent(vec3 value) {
+    return max(value.x, max(value.y, value.z));
+}
+
 vec3 axisAlignedNormal(vec3 normal) {
     vec3 absNormal = abs(normal);
     if (absNormal.x > absNormal.y && absNormal.x > absNormal.z) {
@@ -313,9 +317,11 @@ void main() {
             faceNormal
         );
 
-        float sunShade = lambert(worldNormal, sunDirection) * horizonFade(sunDirection);
-        float moonShade = lambert(worldNormal, moonDirection) * horizonFade(moonDirection);
-        float skyShade = clamp(sunShade + moonShade, 0.0, 1.0);
+        float sunVisibility = horizonFade(sunDirection);
+        float moonVisibility = horizonFade(moonDirection);
+        float sunDirect = lambert(worldNormal, sunDirection) * sunVisibility;
+        float moonDirect = lambert(worldNormal, moonDirection) * moonVisibility;
+        float skyDirectional = clamp(sunDirect + moonDirect * 0.55, 0.0, 1.0);
         vec3 skyLight = max(sampleLightmapAxis(vec2(LIGHTMAP_MIN, v_lightUv.y)) - lightFloor, vec3(0.0));
         vec3 blockLight = max(sampleLightmapAxis(vec2(lightUvFromLevels(blockLevel, 0.0).x, LIGHTMAP_MIN)) - lightFloor, vec3(0.0));
 
@@ -323,13 +329,19 @@ void main() {
         vec3 baseAlbedo = mix(surfaceColor, paletteStartColor, 0.18);
         vec3 skyTint = (paletteEndColor - surfaceColor) * 0.035;
         vec3 blockTint = (paletteEndColor - surfaceColor) * 0.025;
-        vec3 skyEnergy = skyLight * mix(vec3(0.34), vec3(0.68), skyShade);
-        vec3 blockEnergy = blockLight * mix(vec3(0.40), vec3(0.82), blockShade);
+        float skyLightLevel = clamp(maxComponent(skyLight) * 1.75, 0.0, 1.0);
+        float blockLightLevel = clamp(maxComponent(blockLight) * 2.1, 0.0, 1.0);
+        float skyAmbient = mix(0.10, 0.60, skyLightLevel) * clamp(sunVisibility + moonVisibility * 0.35, 0.0, 1.0);
+        float skyDirectionalWeight = mix(0.48, 0.16, skyLightLevel);
+        float blockAmbient = mix(0.12, 0.42, blockLightLevel);
+        float blockDirectionalWeight = mix(0.82, 0.40, blockLightLevel);
+        vec3 skyEnergy = skyLight * min(vec3(skyAmbient + skyDirectional * skyDirectionalWeight), vec3(0.78));
+        vec3 blockEnergy = blockLight * min(vec3(blockAmbient + blockShade * blockDirectionalWeight), vec3(0.88));
         vec3 combinedEnergy = min(skyEnergy + blockEnergy, vec3(0.92));
 
         vec3 lighting = baseAlbedo * combinedEnergy;
-        lighting += skyLight * skyShade * skyTint;
-        lighting += blockLight * blockShade * blockTint;
+        lighting += skyLight * skyDirectional * skyTint * mix(0.85, 0.35, skyLightLevel);
+        lighting += blockLight * blockShade * blockTint * mix(0.90, 0.45, blockLightLevel);
         color = vec4(max(lighting, vec3(0.0)), 1.0);
     } else {
         // --- Vanilla block: unchanged ---

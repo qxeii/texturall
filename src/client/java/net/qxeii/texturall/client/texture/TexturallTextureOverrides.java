@@ -25,6 +25,11 @@ public final class TexturallTextureOverrides {
 
         bootstrapped = true;
 
+        MaterialNoiseSettings stoneOreNoise = noise(4.5, 1.0, 5.0, 1.15);
+        MaterialNoiseSettings deepslateOreNoise = noise(4.9, 1.7, 0.95, 1.35);
+        MaterialNoiseSettings netherOreNoise = noise(3.3, 1.0, 1.0, 1.45);
+        MaterialNoiseSettings ancientDebrisNoise = noise(4.8, 1.35, 0.9, 0.65);
+
         registerVanillaBlock(Blocks.STONE, "stone", "stone", 0x51A2D39CB53F7E1DL, noise(4.25, 1.0, 5.0, 1.0), "stone");
         registerVanillaBlock(Blocks.COBBLESTONE, "cobblestone", "cobblestone", 0xD9278A61B43C1FF2L, noise(0.45, 1.0, 1.0, 1.0), "cobblestone");
         registerVanillaBlock(Blocks.MOSSY_COBBLESTONE, "mossy_cobblestone", "mossy_cobblestone", 0x82FAE19D03C44D71L, noise(0.45, 1.0, 1.0, 1.0), "mossy_cobblestone");
@@ -40,6 +45,26 @@ public final class TexturallTextureOverrides {
         registerVanillaBlock(Blocks.BASALT, "basalt", "basalt_side", 0xE3A1C6704FB2DD19L, noise(4.8, 0.55, 1.7, 0.55), "basalt_side", "basalt_top");
         registerVanillaBlock(Blocks.SMOOTH_BASALT, "smooth_basalt", "smooth_basalt", 0x13D4AF5E78C920B3L, noise(5.0, 0.6, 1.55, 0.3), "smooth_basalt");
         registerVanillaBlock(Blocks.BLACKSTONE, "blackstone", "blackstone", 0x7EB19A0D54F28361L, noise(3.9, 0.95, 1.05, 1.15), "blackstone", "blackstone_top");
+        registerVanillaBlock(Blocks.COAL_ORE, "coal_ore", "coal_ore", 0x8D7324C8A1E40F55L, stoneOreNoise, "coal_ore");
+        registerVanillaBlock(Blocks.IRON_ORE, "iron_ore", "iron_ore", 0x3E7BC2D15A48E90FL, stoneOreNoise, "iron_ore");
+        registerVanillaBlock(Blocks.COPPER_ORE, "copper_ore", "copper_ore", 0x54AE3FC9186DB772L, stoneOreNoise, "copper_ore");
+        registerVanillaBlock(Blocks.GOLD_ORE, "gold_ore", "gold_ore", 0x1FA09B4EC3D87261L, stoneOreNoise, "gold_ore");
+        registerVanillaBlock(Blocks.REDSTONE_ORE, "redstone_ore", "redstone_ore", 0xC4B27E1950F384A2L, stoneOreNoise, "redstone_ore");
+        registerVanillaBlock(Blocks.EMERALD_ORE, "emerald_ore", "emerald_ore", 0x6DE439A17C82B54FL, stoneOreNoise, "emerald_ore");
+        registerVanillaBlock(Blocks.LAPIS_ORE, "lapis_ore", "lapis_ore", 0xA2F8C54D31E7068BL, stoneOreNoise, "lapis_ore");
+        registerVanillaBlock(Blocks.DIAMOND_ORE, "diamond_ore", "diamond_ore", 0x72D184B30FAC695EL, stoneOreNoise, "diamond_ore");
+        registerVanillaBlock(Blocks.DEEPSLATE_COAL_ORE, "deepslate_coal_ore", "deepslate_coal_ore", 0x847E235AB1D60C39L, deepslateOreNoise, "deepslate_coal_ore");
+        registerVanillaBlock(Blocks.DEEPSLATE_IRON_ORE, "deepslate_iron_ore", "deepslate_iron_ore", 0x5CBF1234AE6192D7L, deepslateOreNoise, "deepslate_iron_ore");
+        registerVanillaBlock(Blocks.DEEPSLATE_COPPER_ORE, "deepslate_copper_ore", "deepslate_copper_ore", 0xAF9431C87D5E20B4L, deepslateOreNoise, "deepslate_copper_ore");
+        registerVanillaBlock(Blocks.DEEPSLATE_GOLD_ORE, "deepslate_gold_ore", "deepslate_gold_ore", 0x39A6E7C20D51F48BL, deepslateOreNoise, "deepslate_gold_ore");
+        registerVanillaBlock(Blocks.DEEPSLATE_REDSTONE_ORE, "deepslate_redstone_ore", "deepslate_redstone_ore", 0xE1865B0FA43DC279L, deepslateOreNoise, "deepslate_redstone_ore");
+        registerVanillaBlock(Blocks.DEEPSLATE_EMERALD_ORE, "deepslate_emerald_ore", "deepslate_emerald_ore", 0xB7D41293F0E46C28L, deepslateOreNoise, "deepslate_emerald_ore");
+        registerVanillaBlock(Blocks.DEEPSLATE_LAPIS_ORE, "deepslate_lapis_ore", "deepslate_lapis_ore", 0x24CE98A17BD35FE1L, deepslateOreNoise, "deepslate_lapis_ore");
+        registerVanillaBlock(Blocks.DEEPSLATE_DIAMOND_ORE, "deepslate_diamond_ore", "deepslate_diamond_ore", 0xD9AF3572B41C80E6L, deepslateOreNoise, "deepslate_diamond_ore");
+        registerVanillaBlock(Blocks.NETHER_QUARTZ_ORE, "nether_quartz_ore", "nether_quartz_ore", 0x2E4B7D18C0F36A95L, netherOreNoise, "nether_quartz_ore");
+        registerVanillaBlock(Blocks.NETHER_GOLD_ORE, "nether_gold_ore", "nether_gold_ore", 0x91CE26B4A5D83074L, netherOreNoise, "nether_gold_ore");
+        registerVanillaBlock(Blocks.ANCIENT_DEBRIS, "ancient_debris", "ancient_debris_side", 0xFA1048C26E93B57DL, ancientDebrisNoise, "ancient_debris_side", "ancient_debris_top");
+        registerVanillaBlock(Blocks.GILDED_BLACKSTONE, "gilded_blackstone", "gilded_blackstone", 0x47B0E29D5AF316C8L, noise(3.8, 0.95, 1.05, 1.05), "gilded_blackstone");
 
         ProceduralTextureRegistry.register(MATERIAL_SHADER_INCLUDE_ID, new TexturallMaterialShaderGenerator(MATERIALS.values()));
     }
