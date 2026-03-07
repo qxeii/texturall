@@ -20,6 +20,9 @@ out vec2 texCoord0;
 out vec4 v_baseColor;
 out vec2 v_lightUv;
 out vec3 v_faceNormal;
+out vec3 v_worldPos;
+flat out int v_blockPayload;
+flat out int v_materialId;
 
 void main() {
     vec3 pos = Position + (ChunkPosition - CameraBlockPos) + CameraOffset;
@@ -33,4 +36,8 @@ void main() {
     v_baseColor = Color;
     v_lightUv = lightUv;
     v_faceNormal = Normal;
+    v_worldPos = Position + ChunkPosition;
+    ivec3 colorBytes = ivec3(Color.rgb * 255.0 + 0.5);
+    v_blockPayload = colorBytes.r + colorBytes.g * 256;
+    v_materialId = int(Color.a * 255.0 + 0.5);
 }

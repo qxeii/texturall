@@ -16,7 +16,7 @@ public record WorldAlignedTextureMaterial(
     int materialIndex,
     long seed,
     double scale,
-    int[][] palette,
+    int[] palette,
     int sheetSize
 ) {
     public SpriteIdentifier tileSprite() {

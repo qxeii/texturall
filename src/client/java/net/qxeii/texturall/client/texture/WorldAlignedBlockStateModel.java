@@ -66,8 +66,7 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
     public @Nullable Object createGeometryKey(BlockRenderView blockView, BlockPos pos, BlockState state, Random random) {
         int lightSignature = 1;
         for (Direction face : Direction.values()) {
-            lightSignature = 31 * lightSignature + encodeBlockLightDirection(blockView, pos, face);
-            lightSignature = 31 * lightSignature + faceLightmap(blockView, pos, face);
+            lightSignature = 31 * lightSignature + sampleFaceLighting(blockView, pos, face).hashCode();
         }
 
         return new GeometryKey(
@@ -80,60 +79,38 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
     }
 
     private void emitCanonicalFace(QuadEmitter emitter, BlockRenderView blockView, BlockPos pos, Direction face) {
+        FaceLighting lighting = sampleFaceLighting(blockView, pos, face);
         emitter.nominalFace(face);
         emitter.cullFace(face);
-        // Disable Indigo's baked directional shading and AO so the shader sees one face-level
-        // light sample plus the packed block-light direction payload.
+        // Let the shader own all custom shading so Indigo does not add an extra AO or diffuse pass.
         emitter.diffuseShade(false);
         emitter.ambientOcclusion(TriState.FALSE);
         emitter.shadeMode(ShadeMode.VANILLA);
         writeFacePositions(emitter, face);
-        int materialMarker = encodeBlockLightDirection(blockView, pos, face);
-        emitter.color(0, materialMarker);
-        emitter.color(1, materialMarker);
-        emitter.color(2, materialMarker);
-        emitter.color(3, materialMarker);
-        int faceLight = faceLightmap(blockView, pos, face);
-        emitter.lightmap(faceLight, faceLight, faceLight, faceLight);
+        int blockPayload = encodeNibblePayload(
+            lighting.bottomLeft().block(),
+            lighting.bottomRight().block(),
+            lighting.topLeft().block(),
+            lighting.topRight().block()
+        );
+        int payloadColor = encodePayloadColor(mat.materialIndex(), blockPayload);
+        emitter.color(0, payloadColor);
+        emitter.color(1, payloadColor);
+        emitter.color(2, payloadColor);
+        emitter.color(3, payloadColor);
+        int[] vertexLightmaps = vertexLightmaps(face, lighting);
+        emitter.lightmap(vertexLightmaps[0], vertexLightmaps[1], vertexLightmaps[2], vertexLightmaps[3]);
         remapUv(emitter, pos, face);
         emitter.spriteBake(normalSprite(), MutableQuadView.BAKE_NORMALIZED);
         emitter.emit();
     }
 
-    private int encodeBlockLightDirection(BlockRenderView blockView, BlockPos pos, Direction face) {
-        int sampleX = pos.getX() + face.getOffsetX();
-        int sampleY = pos.getY() + face.getOffsetY();
-        int sampleZ = pos.getZ() + face.getOffsetZ();
-        BlockPos.Mutable mutable = new BlockPos.Mutable();
-
-        float x = sampleBlockLight(blockView, mutable, sampleX + 1, sampleY, sampleZ)
-            - sampleBlockLight(blockView, mutable, sampleX - 1, sampleY, sampleZ);
-        float y = sampleBlockLight(blockView, mutable, sampleX, sampleY + 1, sampleZ)
-            - sampleBlockLight(blockView, mutable, sampleX, sampleY - 1, sampleZ);
-        float z = sampleBlockLight(blockView, mutable, sampleX, sampleY, sampleZ + 1)
-            - sampleBlockLight(blockView, mutable, sampleX, sampleY, sampleZ - 1);
-
-        float normalBias = sampleBlockLight(blockView, mutable, sampleX, sampleY, sampleZ) * 0.35F;
-        x += face.getOffsetX() * normalBias;
-        y += face.getOffsetY() * normalBias;
-        z += face.getOffsetZ() * normalBias;
-
-        float lengthSquared = x * x + y * y + z * z;
-        if (lengthSquared > 1.0e-6F) {
-            float invLength = (float) (1.0 / Math.sqrt(lengthSquared));
-            x *= invLength;
-            y *= invLength;
-            z *= invLength;
-        } else {
-            x = face.getOffsetX();
-            y = face.getOffsetY();
-            z = face.getOffsetZ();
-        }
-
-        return (mat.materialIndex() << 24)
-            | (encodeUnitChannel(x) << 16)
-            | (encodeUnitChannel(y) << 8)
-            | encodeUnitChannel(z);
+    private FaceLighting sampleFaceLighting(BlockRenderView blockView, BlockPos pos, Direction face) {
+        CornerLight bottomLeft = sampleCornerLight(blockView, pos, face, false, false);
+        CornerLight bottomRight = sampleCornerLight(blockView, pos, face, true, false);
+        CornerLight topRight = sampleCornerLight(blockView, pos, face, true, true);
+        CornerLight topLeft = sampleCornerLight(blockView, pos, face, false, true);
+        return new FaceLighting(bottomLeft, bottomRight, topRight, topLeft);
     }
 
     private static int sampleBlockLight(BlockRenderView blockView, BlockPos.Mutable mutable, int x, int y, int z) {
@@ -145,21 +122,132 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         return blockView.getLightLevel(lightType, mutable);
     }
 
-    private static int encodeUnitChannel(float value) {
-        float normalized = value * 0.5F + 0.5F;
-        if (normalized < 0.0F) {
-            normalized = 0.0F;
-        } else if (normalized > 1.0F) {
-            normalized = 1.0F;
-        }
-        return Math.round(normalized * 255.0F);
+    private static int packCornerLight(CornerLight cornerLight) {
+        return LightmapTextureManager.pack(cornerLight.block(), cornerLight.sky());
     }
 
-    private static int faceLightmap(BlockRenderView blockView, BlockPos pos, Direction face) {
-        BlockPos samplePos = pos.offset(face);
-        int blockLight = blockView.getLightLevel(LightType.BLOCK, samplePos);
-        int skyLight = blockView.getLightLevel(LightType.SKY, samplePos);
-        return LightmapTextureManager.pack(blockLight, skyLight);
+    private static int encodeNibblePayload(int bottomLeft, int bottomRight, int topLeft, int topRight) {
+        return (clampLightNibble(bottomLeft))
+            | (clampLightNibble(bottomRight) << 4)
+            | (clampLightNibble(topLeft) << 8)
+            | (clampLightNibble(topRight) << 12);
+    }
+
+    private static int encodePayloadColor(int materialIndex, int blockPayload) {
+        return ((materialIndex & 0xFF) << 24)
+            | ((blockPayload & 0xFF) << 16)
+            | (((blockPayload >> 8) & 0xFF) << 8)
+            | 0xFF;
+    }
+
+    private static int clampLightNibble(int lightLevel) {
+        return Math.max(0, Math.min(15, lightLevel));
+    }
+
+    private static CornerLight sampleCornerLight(BlockRenderView blockView, BlockPos pos, Direction face, boolean uHigh, boolean vHigh) {
+        FaceAxes axes = FaceAxes.forFace(face);
+        int baseX = pos.getX() + face.getOffsetX();
+        int baseY = pos.getY() + face.getOffsetY();
+        int baseZ = pos.getZ() + face.getOffsetZ();
+        int cornerX = baseX + (uHigh ? axes.u().getOffsetX() : 0) + (vHigh ? axes.v().getOffsetX() : 0);
+        int cornerY = baseY + (uHigh ? axes.u().getOffsetY() : 0) + (vHigh ? axes.v().getOffsetY() : 0);
+        int cornerZ = baseZ + (uHigh ? axes.u().getOffsetZ() : 0) + (vHigh ? axes.v().getOffsetZ() : 0);
+        int uStepX = axes.u().getOffsetX();
+        int uStepY = axes.u().getOffsetY();
+        int uStepZ = axes.u().getOffsetZ();
+        int vStepX = axes.v().getOffsetX();
+        int vStepY = axes.v().getOffsetY();
+        int vStepZ = axes.v().getOffsetZ();
+        BlockPos.Mutable mutable = new BlockPos.Mutable();
+
+        int block = averageLight(
+            blockView,
+            mutable,
+            LightType.BLOCK,
+            cornerX,
+            cornerY,
+            cornerZ,
+            cornerX - uStepX,
+            cornerY - uStepY,
+            cornerZ - uStepZ,
+            cornerX - vStepX,
+            cornerY - vStepY,
+            cornerZ - vStepZ,
+            cornerX - uStepX - vStepX,
+            cornerY - uStepY - vStepY,
+            cornerZ - uStepZ - vStepZ
+        );
+        int sky = averageLight(
+            blockView,
+            mutable,
+            LightType.SKY,
+            cornerX,
+            cornerY,
+            cornerZ,
+            cornerX - uStepX,
+            cornerY - uStepY,
+            cornerZ - uStepZ,
+            cornerX - vStepX,
+            cornerY - vStepY,
+            cornerZ - vStepZ,
+            cornerX - uStepX - vStepX,
+            cornerY - uStepY - vStepY,
+            cornerZ - uStepZ - vStepZ
+        );
+        return new CornerLight(block, sky);
+    }
+
+    private static int[] vertexLightmaps(Direction face, FaceLighting lighting) {
+        return switch (face) {
+            case DOWN, SOUTH, WEST -> new int[] {
+                packCornerLight(lighting.bottomLeft()),
+                packCornerLight(lighting.bottomRight()),
+                packCornerLight(lighting.topRight()),
+                packCornerLight(lighting.topLeft())
+            };
+            case UP -> new int[] {
+                packCornerLight(lighting.bottomLeft()),
+                packCornerLight(lighting.topLeft()),
+                packCornerLight(lighting.topRight()),
+                packCornerLight(lighting.bottomRight())
+            };
+            case NORTH -> new int[] {
+                packCornerLight(lighting.bottomRight()),
+                packCornerLight(lighting.bottomLeft()),
+                packCornerLight(lighting.topLeft()),
+                packCornerLight(lighting.topRight())
+            };
+            case EAST -> new int[] {
+                packCornerLight(lighting.bottomRight()),
+                packCornerLight(lighting.bottomLeft()),
+                packCornerLight(lighting.topLeft()),
+                packCornerLight(lighting.topRight())
+            };
+        };
+    }
+
+    private static int averageLight(
+        BlockRenderView blockView,
+        BlockPos.Mutable mutable,
+        LightType lightType,
+        int x0,
+        int y0,
+        int z0,
+        int x1,
+        int y1,
+        int z1,
+        int x2,
+        int y2,
+        int z2,
+        int x3,
+        int y3,
+        int z3
+    ) {
+        int total = sampleLight(blockView, mutable, lightType, x0, y0, z0)
+            + sampleLight(blockView, mutable, lightType, x1, y1, z1)
+            + sampleLight(blockView, mutable, lightType, x2, y2, z2)
+            + sampleLight(blockView, mutable, lightType, x3, y3, z3);
+        return Math.round(total * 0.25F);
     }
 
     private void remapUv(MutableQuadView quad, BlockPos pos, Direction face) {
@@ -253,5 +341,21 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
     }
 
     private record GeometryKey(Class<?> delegateType, int x, int y, int z, int lightSignature) {
+    }
+
+    private record CornerLight(int block, int sky) {
+    }
+
+    private record FaceLighting(CornerLight bottomLeft, CornerLight bottomRight, CornerLight topRight, CornerLight topLeft) {
+    }
+
+    private record FaceAxes(Direction u, Direction v) {
+        private static FaceAxes forFace(Direction face) {
+            return switch (face) {
+                case UP, DOWN -> new FaceAxes(Direction.EAST, Direction.SOUTH);
+                case NORTH, SOUTH -> new FaceAxes(Direction.EAST, Direction.UP);
+                case WEST, EAST -> new FaceAxes(Direction.SOUTH, Direction.UP);
+            };
+        }
     }
 }
