@@ -94,7 +94,7 @@ vec3 sampleLightmapAxis(vec2 uv) {
     return texture(Sampler2, clamp(uv, vec2(LIGHTMAP_MIN), vec2(15.5 / 16.0))).rgb;
 }
 
-vec3 materialMinDirectionalColor(int materialId) {
+vec3 materialPaletteStartColor(int materialId) {
     if (materialId == 1) {
         return vec3(56.0, 59.0, 63.0) / 255.0;
     }
@@ -110,7 +110,7 @@ vec3 materialMinDirectionalColor(int materialId) {
     return vec3(0.0);
 }
 
-vec3 materialMaxDirectionalColor(int materialId) {
+vec3 materialPaletteEndColor(int materialId) {
     if (materialId == 1) {
         return vec3(140.0, 145.0, 151.0) / 255.0;
     }
@@ -182,8 +182,8 @@ void main() {
         vec3 sunDirection = normalizeOr(Light0_Direction, vec3(0.0, 1.0, 0.0));
         vec3 moonDirection = normalizeOr(Light1_Direction, -sunDirection);
         vec3 blockDirection = decodeDirection(v_baseColor.rgb, faceNormal);
-        vec3 minDirectionalColor = materialMinDirectionalColor(materialId);
-        vec3 maxDirectionalColor = materialMaxDirectionalColor(materialId);
+        vec3 paletteStartColor = materialPaletteStartColor(materialId);
+        vec3 paletteEndColor = materialPaletteEndColor(materialId);
 
         float sunShade = lambert(worldNormal, sunDirection) * horizonFade(sunDirection);
         float moonShade = lambert(worldNormal, moonDirection) * horizonFade(moonDirection);
@@ -192,8 +192,8 @@ void main() {
         vec3 blockLight = max(sampleLightmapAxis(vec2(v_lightUv.x, LIGHTMAP_MIN)) - lightFloor, vec3(0.0));
 
         float blockShade = lambert(worldNormal, blockDirection);
-        vec3 skyDirectionalColor = mix(minDirectionalColor, maxDirectionalColor, skyShade);
-        vec3 blockDirectionalColor = mix(minDirectionalColor, maxDirectionalColor, blockShade);
+        vec3 skyDirectionalColor = mix(paletteStartColor, paletteEndColor, skyShade);
+        vec3 blockDirectionalColor = mix(paletteStartColor, paletteEndColor, blockShade);
 
         vec3 lighting = skyLight * skyDirectionalColor + blockLight * blockDirectionalColor;
         color = vec4(lighting, 1.0);

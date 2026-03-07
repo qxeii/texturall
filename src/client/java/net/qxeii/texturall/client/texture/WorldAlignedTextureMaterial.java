@@ -8,6 +8,7 @@ import net.minecraft.util.Identifier;
 public record WorldAlignedTextureMaterial(
     Block block,
     Identifier tileTextureId,
+    Identifier tileSpriteId,
     Identifier sheetTextureResourceId,
     Identifier sheetSpriteId,
     Identifier normalTextureResourceId,
@@ -16,11 +17,13 @@ public record WorldAlignedTextureMaterial(
     long seed,
     double scale,
     int[][] palette,
-    int[] minDirectionalColor,
-    int[] maxDirectionalColor,
     int sheetSize
 ) {
-    public SpriteIdentifier spriteId() {
+    public SpriteIdentifier tileSprite() {
+        return new SpriteIdentifier(SpriteAtlasTexture.BLOCK_ATLAS_TEXTURE, tileSpriteId);
+    }
+
+    public SpriteIdentifier normalSprite() {
         return new SpriteIdentifier(SpriteAtlasTexture.BLOCK_ATLAS_TEXTURE, normalSpriteId);
     }
 }

@@ -37,12 +37,12 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
 
     @Override
     public Sprite particleSprite() {
-        return sheetSprite();
+        return tileSprite();
     }
 
     @Override
     public Sprite particleSprite(BlockRenderView blockView, BlockPos pos, BlockState state) {
-        return sheetSprite();
+        return tileSprite();
     }
 
     @Override
@@ -96,7 +96,7 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         int faceLight = faceLightmap(blockView, pos, face);
         emitter.lightmap(faceLight, faceLight, faceLight, faceLight);
         remapUv(emitter, pos, face);
-        emitter.spriteBake(sheetSprite(), MutableQuadView.BAKE_NORMALIZED);
+        emitter.spriteBake(normalSprite(), MutableQuadView.BAKE_NORMALIZED);
         emitter.emit();
     }
 
@@ -244,8 +244,12 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         return wrapped < 0.0F ? wrapped + bound : wrapped;
     }
 
-    private Sprite sheetSprite() {
-        return MinecraftClient.getInstance().getAtlasManager().getSprite(mat.spriteId());
+    private Sprite tileSprite() {
+        return MinecraftClient.getInstance().getAtlasManager().getSprite(mat.tileSprite());
+    }
+
+    private Sprite normalSprite() {
+        return MinecraftClient.getInstance().getAtlasManager().getSprite(mat.normalSprite());
     }
 
     private record GeometryKey(Class<?> delegateType, int x, int y, int z, int lightSignature) {
