@@ -76,12 +76,15 @@ public final class TexturallMaterialShaderGenerator implements ProceduralTexture
         shader.append("    switch (materialId) {\n");
         for (WorldAlignedTextureMaterial material : materials) {
             int[] palette = material.palette();
-            shader.append("        case ").append(material.materialIndex()).append(": return texturallPaletteSample5(")
-                .append(formatHex(palette[0])).append(", ")
-                .append(formatHex(palette[1])).append(", ")
-                .append(formatHex(palette[2])).append(", ")
-                .append(formatHex(palette[3])).append(", ")
-                .append(formatHex(palette[4])).append(", value);\n");
+            shader.append("        case ").append(material.materialIndex()).append(": {\n");
+            shader.append("            float scaled = clamp(value, 0.0, 1.0) * ").append(palette.length - 1).append(".0;\n");
+            for (int i = 0; i < palette.length - 1; i++) {
+                shader.append("            if (scaled < ").append(i + 1).append(".0) return mix(texturallRgbHex(")
+                    .append(formatHex(palette[i])).append("), texturallRgbHex(")
+                    .append(formatHex(palette[i + 1])).append("), scaled - ").append(i).append(".0);\n");
+            }
+            shader.append("            return texturallRgbHex(").append(formatHex(palette[palette.length - 1])).append(");\n");
+            shader.append("        }\n");
         }
         shader.append("        default: return vec3(0.0);\n");
         shader.append("    }\n");

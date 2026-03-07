@@ -6,6 +6,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 
 public final class NoiseTextureGenerator implements ProceduralTextureGenerator {
+    private static final double DETAIL_WEIGHT = 0.45;
+    private static final double CONTRAST = 2.35;
+    private static final double CRACK_DARKENING = 0.28;
+
     private final int size;
     private final int[] palette;
     private final SeamlessNoiseField noiseField;
@@ -21,8 +25,7 @@ public final class NoiseTextureGenerator implements ProceduralTextureGenerator {
         BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < size; y++) {
             for (int x = 0; x < size; x++) {
-                double h = sample(x, y);
-                image.setRGB(x, y, samplePalette(h));
+                image.setRGB(x, y, samplePalette(sampleColorVariation(x, y)));
             }
         }
 
@@ -35,7 +38,7 @@ public final class NoiseTextureGenerator implements ProceduralTextureGenerator {
     }
 
     private int samplePalette(double value) {
-        double scaled = value * (palette.length - 1);
+        double scaled = clamp01(value) * (palette.length - 1);
         int lowerIndex = (int) Math.floor(scaled);
         int upperIndex = Math.min(palette.length - 1, lowerIndex + 1);
         double t = scaled - lowerIndex;
@@ -50,6 +53,26 @@ public final class NoiseTextureGenerator implements ProceduralTextureGenerator {
 
     public double sample(int pixelX, int pixelY) {
         return noiseField.sample(pixelX, pixelY);
+    }
+
+    private double sampleColorVariation(int pixelX, int pixelY) {
+        double base = sample(pixelX, pixelY);
+        double detail = sample(pixelX * 10, pixelY * 10);
+        double crackMask = noiseField.sampleCrackMask(pixelX, pixelY);
+        return applyContrast(mix(base, detail, DETAIL_WEIGHT) - crackMask * CRACK_DARKENING);
+    }
+
+    private static double applyContrast(double value) {
+        double centered = (clamp01(value) - 0.5) * CONTRAST + 0.5;
+        return clamp01(centered);
+    }
+
+    private static double mix(double start, double end, double t) {
+        return start + (end - start) * t;
+    }
+
+    private static double clamp01(double value) {
+        return Math.max(0.0, Math.min(1.0, value));
     }
 
     private static int lerp(int start, int end, double t) {

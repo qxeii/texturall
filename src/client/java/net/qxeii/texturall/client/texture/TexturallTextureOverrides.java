@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 public final class TexturallTextureOverrides {
+    private static final int PALETTE_STEPS = 16;
     private static boolean bootstrapped;
     private static final Identifier MATERIAL_SHADER_INCLUDE_ID = Identifier.ofVanilla("shaders/include/texturall_materials.glsl");
     private static final Map<Block, WorldAlignedTextureMaterial> MATERIALS = new LinkedHashMap<>();
@@ -66,7 +67,7 @@ public final class TexturallTextureOverrides {
         for (int i = 0; i < paletteTextureNames.length; i++) {
             paletteTextureIds[i] = Identifier.ofVanilla("textures/block/" + paletteTextureNames[i] + ".png");
         }
-        int[] palette = VanillaTexturePaletteExtractor.derivePalette(5, paletteTextureIds);
+        int[] palette = VanillaTexturePaletteExtractor.derivePalette(PALETTE_STEPS, paletteTextureIds);
 
         ProceduralTextureRegistry.register(
             tileId,

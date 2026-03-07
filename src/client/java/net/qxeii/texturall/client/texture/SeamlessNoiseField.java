@@ -5,6 +5,12 @@ public final class SeamlessNoiseField {
     private static final double WARP_FREQUENCY = 0.11;
     private static final double WARP_AMPLITUDE = 5.0;
     private static final int OCTAVES = 4;
+    private static final double CRACK_FREQUENCY = 0.58;
+    private static final double CRACK_MEDIUM_FREQUENCY = 1.22;
+    private static final double CRACK_SPREAD_FREQUENCY = 0.52;
+    private static final double CRACK_HALF_WIDTH = 0.11;
+    private static final double CRACK_SPREAD_SOFTNESS = 0.10;
+    private static final double CRACK_QUANTITY = 0.62;
 
     private final int size;
     private final double scale;
@@ -13,6 +19,9 @@ public final class SeamlessNoiseField {
     private final SimplexNoise noise;
     private final SimplexNoise warpNoiseX;
     private final SimplexNoise warpNoiseY;
+    private final SimplexNoise crackNoise;
+    private final SimplexNoise crackMediumNoise;
+    private final SimplexNoise crackSpreadNoise;
 
     public SeamlessNoiseField(int size, long seed, double scale) {
         this.size = size;
@@ -22,6 +31,9 @@ public final class SeamlessNoiseField {
         this.noise = new SimplexNoise(seed);
         this.warpNoiseX = new SimplexNoise(seed ^ 0x517CC1B727220A95L);
         this.warpNoiseY = new SimplexNoise(seed ^ 0xBF58476D1CE4E5B9L);
+        this.crackNoise = new SimplexNoise(seed ^ 0x94D049BB133111EBL);
+        this.crackMediumNoise = new SimplexNoise(seed ^ 0x369DEA0F31A53F85L);
+        this.crackSpreadNoise = new SimplexNoise(seed ^ 0xDB4F0B9175AE2165L);
     }
 
     public double sample(int pixelX, int pixelY) {
@@ -35,6 +47,40 @@ public final class SeamlessNoiseField {
 
     public int wrap(int pixel) {
         return Math.floorMod(pixel, size);
+    }
+
+    public double sampleCrackMask(int pixelX, int pixelY) {
+        double x = pixelX / scale;
+        double y = pixelY / scale;
+        double crackBase = sampleSeamless(
+            crackNoise,
+            x * CRACK_FREQUENCY,
+            y * CRACK_FREQUENCY,
+            periodX * CRACK_FREQUENCY,
+            periodY * CRACK_FREQUENCY
+        );
+        double crackMedium = sampleSeamless(
+            crackMediumNoise,
+            x * CRACK_MEDIUM_FREQUENCY,
+            y * CRACK_MEDIUM_FREQUENCY,
+            periodX * CRACK_MEDIUM_FREQUENCY,
+            periodY * CRACK_MEDIUM_FREQUENCY
+        ) * 0.5;
+        double crackNoiseValue = clamp01(((crackBase + crackMedium) / 1.5) * 0.5 + 0.5);
+        double crackSpread = sampleSeamless(
+            crackSpreadNoise,
+            x * CRACK_SPREAD_FREQUENCY,
+            y * CRACK_SPREAD_FREQUENCY,
+            periodX * CRACK_SPREAD_FREQUENCY,
+            periodY * CRACK_SPREAD_FREQUENCY
+        ) * 0.5 + 0.5;
+        double crackBand = smoothstep(0.0, Math.max(CRACK_HALF_WIDTH, 1.0e-6), Math.abs(crackNoiseValue - 0.5));
+        double crackPresence = CRACK_QUANTITY * smoothstep(
+            crackSpread - CRACK_SPREAD_SOFTNESS,
+            crackSpread + CRACK_SPREAD_SOFTNESS,
+            CRACK_QUANTITY
+        );
+        return clamp01(crackPresence * (1.0 - crackBand));
     }
 
     private static double sampleSeamless(SimplexNoise noise, double x, double y, double periodX, double periodY) {
@@ -84,6 +130,14 @@ public final class SeamlessNoiseField {
 
     private static double fade(double value) {
         return value * value * value * (value * (value * 6.0 - 15.0) + 10.0);
+    }
+
+    private static double smoothstep(double edge0, double edge1, double value) {
+        if (edge0 == edge1) {
+            return value < edge0 ? 0.0 : 1.0;
+        }
+        double t = clamp01((value - edge0) / (edge1 - edge0));
+        return t * t * (3.0 - 2.0 * t);
     }
 
     private static double lerp(double start, double end, double delta) {

@@ -320,14 +320,17 @@ void main() {
         vec3 blockLight = max(sampleLightmapAxis(vec2(lightUvFromLevels(blockLevel, 0.0).x, LIGHTMAP_MIN)) - lightFloor, vec3(0.0));
 
         float blockShade = lambert(worldNormal, blockDirection);
-        vec3 shadowColor = mix(paletteStartColor, surfaceColor, 0.65);
-        vec3 skyHighlightColor = mix(surfaceColor, paletteEndColor, 0.6);
-        vec3 blockHighlightColor = mix(surfaceColor, paletteEndColor, 0.45);
-        vec3 skyDirectionalColor = mix(shadowColor, skyHighlightColor, skyShade);
-        vec3 blockDirectionalColor = mix(shadowColor, blockHighlightColor, blockShade);
+        vec3 baseAlbedo = mix(surfaceColor, paletteStartColor, 0.18);
+        vec3 skyTint = (paletteEndColor - surfaceColor) * 0.035;
+        vec3 blockTint = (paletteEndColor - surfaceColor) * 0.025;
+        vec3 skyEnergy = skyLight * mix(vec3(0.34), vec3(0.68), skyShade);
+        vec3 blockEnergy = blockLight * mix(vec3(0.40), vec3(0.82), blockShade);
+        vec3 combinedEnergy = min(skyEnergy + blockEnergy, vec3(0.92));
 
-        vec3 lighting = skyLight * skyDirectionalColor + blockLight * blockDirectionalColor;
-        color = vec4(lighting, 1.0);
+        vec3 lighting = baseAlbedo * combinedEnergy;
+        lighting += skyLight * skyShade * skyTint;
+        lighting += blockLight * blockShade * blockTint;
+        color = vec4(max(lighting, vec3(0.0)), 1.0);
     } else {
         // --- Vanilla block: unchanged ---
         vec2 pixelSize = 1.0 / vec2(TextureSize);
