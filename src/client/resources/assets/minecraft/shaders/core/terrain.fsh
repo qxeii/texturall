@@ -18,6 +18,7 @@ in vec2 v_lightUv;
 in vec3 v_faceNormal;
 in vec3 v_worldPos;
 flat in int v_blockPayload;
+flat in int v_neighborPayload;
 flat in int v_materialId;
 
 out vec4 fragColor;
@@ -96,6 +97,11 @@ vec3 sampleLightmapAxis(vec2 uv) {
 
 float maxComponent(vec3 value) {
     return max(value.x, max(value.y, value.z));
+}
+
+vec3 effectiveLightFloor(vec3 lightFloor) {
+    float suppress = smoothstep(0.10, 0.24, maxComponent(lightFloor));
+    return lightFloor * (1.0 - suppress);
 }
 
 vec3 axisAlignedNormal(vec3 normal) {
@@ -254,13 +260,39 @@ float decodePackedNibble(int packedValue, int nibbleIndex) {
     return float((packedValue / divisor) % 16);
 }
 
+int decodePackedMaterial6(int packedValue, int fieldIndex) {
+    int divisor = 1;
+    if (fieldIndex == 1) {
+        divisor = 64;
+    } else if (fieldIndex == 2) {
+        divisor = 4096;
+    } else if (fieldIndex == 3) {
+        divisor = 262144;
+    }
+    return (packedValue / divisor) % 64;
+}
+
 vec2 alignToFaceTexelGrid(vec2 faceUv) {
     return clamp((floor(faceUv * 16.0) + 0.5) / 16.0, vec2(0.0), vec2(1.0));
+}
+
+float edgeBlendWeight(float distanceToEdge, int neighborMaterialId, int currentMaterialId) {
+    if (neighborMaterialId == 0 || neighborMaterialId == currentMaterialId || !isTexturallMaterial(neighborMaterialId)) {
+        return 0.0;
+    }
+    const float bandWidth = 8.0 / 16.0;
+    return 1.0 - smoothstep(0.0, bandWidth, distanceToEdge);
 }
 
 float bilerpLight(float bottomLeft, float bottomRight, float topLeft, float topRight, vec2 faceUv) {
     float bottom = mix(bottomLeft, bottomRight, faceUv.x);
     float top = mix(topLeft, topRight, faceUv.x);
+    return mix(bottom, top, faceUv.y);
+}
+
+vec3 bilerpLightColor(vec3 bottomLeft, vec3 bottomRight, vec3 topLeft, vec3 topRight, vec2 faceUv) {
+    vec3 bottom = mix(bottomLeft, bottomRight, faceUv.x);
+    vec3 top = mix(topLeft, topRight, faceUv.x);
     return mix(bottom, top, faceUv.y);
 }
 
@@ -285,7 +317,7 @@ void main() {
 #endif
 
     vec4 color;
-    vec3 lightFloor = sampleLightmapAxis(vec2(LIGHTMAP_MIN));
+    vec3 lightFloor = effectiveLightFloor(sampleLightmapAxis(vec2(LIGHTMAP_MIN)));
 
     if (isCustomMaterial) {
         vec3 faceNormal = axisAlignedNormal(normalize(v_faceNormal));
@@ -299,21 +331,50 @@ void main() {
         vec3 sunDirection = normalizeOr(Light0_Direction, vec3(0.0, 1.0, 0.0));
         vec3 moonDirection = normalizeOr(Light1_Direction, -sunDirection);
         float surfaceVariation = normalSample.a;
-        vec3 surfaceColor = materialPaletteColor(v_materialId, surfaceVariation);
         vec3 paletteStartColor = materialPaletteStartColor(v_materialId);
         vec3 paletteEndColor = materialPaletteEndColor(v_materialId);
         vec3 localPos = v_worldPos - blockOrigin(v_worldPos, faceNormal);
-        vec2 faceUv = alignToFaceTexelGrid(faceLightUv(localPos, faceNormal));
+        vec2 smoothFaceUv = faceLightUv(localPos, faceNormal);
+        vec2 faceUv = alignToFaceTexelGrid(smoothFaceUv);
+        int uLowMaterial = decodePackedMaterial6(v_neighborPayload, 0);
+        int uHighMaterial = decodePackedMaterial6(v_neighborPayload, 1);
+        int vLowMaterial = decodePackedMaterial6(v_neighborPayload, 2);
+        int vHighMaterial = decodePackedMaterial6(v_neighborPayload, 3);
+        vec4 edgeWeights = vec4(
+            edgeBlendWeight(faceUv.x, uLowMaterial, v_materialId),
+            edgeBlendWeight(1.0 - faceUv.x, uHighMaterial, v_materialId),
+            edgeBlendWeight(faceUv.y, vLowMaterial, v_materialId),
+            edgeBlendWeight(1.0 - faceUv.y, vHighMaterial, v_materialId)
+        );
+        float totalBlendWeight = 1.0 + edgeWeights.x + edgeWeights.y + edgeWeights.z + edgeWeights.w;
+        vec3 surfaceColor = materialPaletteColor(v_materialId, surfaceVariation);
+        surfaceColor += materialPaletteColor(uLowMaterial, surfaceVariation) * edgeWeights.x;
+        surfaceColor += materialPaletteColor(uHighMaterial, surfaceVariation) * edgeWeights.y;
+        surfaceColor += materialPaletteColor(vLowMaterial, surfaceVariation) * edgeWeights.z;
+        surfaceColor += materialPaletteColor(vHighMaterial, surfaceVariation) * edgeWeights.w;
+        surfaceColor /= totalBlendWeight;
+        paletteStartColor += materialPaletteStartColor(uLowMaterial) * edgeWeights.x;
+        paletteStartColor += materialPaletteStartColor(uHighMaterial) * edgeWeights.y;
+        paletteStartColor += materialPaletteStartColor(vLowMaterial) * edgeWeights.z;
+        paletteStartColor += materialPaletteStartColor(vHighMaterial) * edgeWeights.w;
+        paletteStartColor /= totalBlendWeight;
+        paletteEndColor += materialPaletteEndColor(uLowMaterial) * edgeWeights.x;
+        paletteEndColor += materialPaletteEndColor(uHighMaterial) * edgeWeights.y;
+        paletteEndColor += materialPaletteEndColor(vLowMaterial) * edgeWeights.z;
+        paletteEndColor += materialPaletteEndColor(vHighMaterial) * edgeWeights.w;
+        paletteEndColor /= totalBlendWeight;
 
         float blockBottomLeft = decodePackedNibble(v_blockPayload, 0);
         float blockBottomRight = decodePackedNibble(v_blockPayload, 1);
         float blockTopLeft = decodePackedNibble(v_blockPayload, 2);
         float blockTopRight = decodePackedNibble(v_blockPayload, 3);
-
         float blockLevel = bilerpLight(blockBottomLeft, blockBottomRight, blockTopLeft, blockTopRight, faceUv);
+        float blockLightLevel = clamp(blockLevel / 15.0, 0.0, 1.0);
+        float blockResponse = smoothstep(0.0, 1.0, blockLightLevel);
         vec2 blockGradient = bilerpGradient(blockBottomLeft, blockBottomRight, blockTopLeft, blockTopRight, faceUv);
+        float blockFacingBias = mix(1.0, 1.85, blockResponse);
         vec3 blockDirection = normalizeOr(
-            lightBasis * normalize(vec3(blockGradient, max(1.0, blockLevel * 0.35))),
+            lightBasis * normalize(vec3(blockGradient, blockFacingBias)),
             faceNormal
         );
 
@@ -323,19 +384,24 @@ void main() {
         float moonDirect = lambert(worldNormal, moonDirection) * moonVisibility;
         float skyDirectional = clamp(sunDirect + moonDirect * 0.55, 0.0, 1.0);
         vec3 skyLight = max(sampleLightmapAxis(vec2(LIGHTMAP_MIN, v_lightUv.y)) - lightFloor, vec3(0.0));
-        vec3 blockLight = max(sampleLightmapAxis(vec2(lightUvFromLevels(blockLevel, 0.0).x, LIGHTMAP_MIN)) - lightFloor, vec3(0.0));
+        vec3 blockLightBottomLeft = max(sampleLightmapAxis(vec2(lightUvFromLevels(blockBottomLeft, 0.0).x, LIGHTMAP_MIN)) - lightFloor, vec3(0.0));
+        vec3 blockLightBottomRight = max(sampleLightmapAxis(vec2(lightUvFromLevels(blockBottomRight, 0.0).x, LIGHTMAP_MIN)) - lightFloor, vec3(0.0));
+        vec3 blockLightTopLeft = max(sampleLightmapAxis(vec2(lightUvFromLevels(blockTopLeft, 0.0).x, LIGHTMAP_MIN)) - lightFloor, vec3(0.0));
+        vec3 blockLightTopRight = max(sampleLightmapAxis(vec2(lightUvFromLevels(blockTopRight, 0.0).x, LIGHTMAP_MIN)) - lightFloor, vec3(0.0));
+        vec3 blockLight = bilerpLightColor(blockLightBottomLeft, blockLightBottomRight, blockLightTopLeft, blockLightTopRight, faceUv);
 
         float blockShade = lambert(worldNormal, blockDirection);
         vec3 baseAlbedo = mix(surfaceColor, paletteStartColor, 0.18);
         vec3 skyTint = (paletteEndColor - surfaceColor) * 0.035;
         vec3 blockTint = (paletteEndColor - surfaceColor) * 0.025;
-        float skyLightLevel = clamp(maxComponent(skyLight) * 1.75, 0.0, 1.0);
-        float blockLightLevel = clamp(maxComponent(blockLight) * 2.1, 0.0, 1.0);
-        float skyAmbient = mix(0.10, 0.60, skyLightLevel) * clamp(sunVisibility + moonVisibility * 0.35, 0.0, 1.0);
-        float skyDirectionalWeight = mix(0.48, 0.16, skyLightLevel);
-        float blockAmbient = mix(0.12, 0.42, blockLightLevel);
-        float blockDirectionalWeight = mix(0.82, 0.40, blockLightLevel);
-        vec3 skyEnergy = skyLight * min(vec3(skyAmbient + skyDirectional * skyDirectionalWeight), vec3(0.78));
+        float skyLightLevel = clamp(maxComponent(skyLight) * 2.35, 0.0, 1.0);
+        // Let the lightmap carry nighttime moon/sky energy; only the directional accent
+        // should depend on whether the sun or moon is actually facing the surface.
+        float skyAmbient = mix(0.42, 0.62, skyLightLevel);
+        float skyDirectionalWeight = mix(0.64, 0.18, skyLightLevel);
+        float blockAmbient = mix(0.10, 0.48, blockResponse);
+        float blockDirectionalWeight = mix(0.88, 0.32, blockResponse);
+        vec3 skyEnergy = skyLight * min(vec3(skyAmbient + skyDirectional * skyDirectionalWeight), vec3(0.86));
         vec3 blockEnergy = blockLight * min(vec3(blockAmbient + blockShade * blockDirectionalWeight), vec3(0.88));
         vec3 combinedEnergy = min(skyEnergy + blockEnergy, vec3(0.92));
 

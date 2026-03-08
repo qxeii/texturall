@@ -5,6 +5,7 @@ import net.fabricmc.fabric.api.renderer.v1.mesh.QuadEmitter;
 import net.fabricmc.fabric.api.renderer.v1.mesh.ShadeMode;
 import net.fabricmc.fabric.api.renderer.v1.model.FabricBlockStateModel;
 import net.fabricmc.fabric.api.util.TriState;
+import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.LightmapTextureManager;
@@ -65,8 +66,10 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
     @Override
     public @Nullable Object createGeometryKey(BlockRenderView blockView, BlockPos pos, BlockState state, Random random) {
         int lightSignature = 1;
+        int blendSignature = 1;
         for (Direction face : Direction.values()) {
             lightSignature = 31 * lightSignature + sampleFaceLighting(blockView, pos, face).hashCode();
+            blendSignature = 31 * blendSignature + sampleBlendNeighborPayload(blockView, pos, face);
         }
 
         return new GeometryKey(
@@ -74,7 +77,8 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
             pos.getX(),
             pos.getY(),
             pos.getZ(),
-            lightSignature
+            lightSignature,
+            blendSignature
         );
     }
 
@@ -87,19 +91,25 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         emitter.ambientOcclusion(TriState.FALSE);
         emitter.shadeMode(ShadeMode.VANILLA);
         writeFacePositions(emitter, face);
+        int neighborPayload = sampleBlendNeighborPayload(blockView, pos, face);
         int blockPayload = encodeNibblePayload(
             lighting.bottomLeft().block(),
             lighting.bottomRight().block(),
             lighting.topLeft().block(),
             lighting.topRight().block()
         );
-        int payloadColor = encodePayloadColor(mat.materialIndex(), blockPayload);
+        int payloadColor = encodePayloadColor(mat.materialIndex(), neighborPayload);
         emitter.color(0, payloadColor);
         emitter.color(1, payloadColor);
         emitter.color(2, payloadColor);
         emitter.color(3, payloadColor);
         int[] vertexLightmaps = vertexLightmaps(face, lighting);
-        emitter.lightmap(vertexLightmaps[0], vertexLightmaps[1], vertexLightmaps[2], vertexLightmaps[3]);
+        emitter.lightmap(
+            packCustomLightmap(vertexLightmaps[0], blockPayload),
+            packCustomLightmap(vertexLightmaps[1], blockPayload),
+            packCustomLightmap(vertexLightmaps[2], blockPayload),
+            packCustomLightmap(vertexLightmaps[3], blockPayload)
+        );
         remapUv(emitter, pos, face);
         emitter.spriteBake(normalSprite(), MutableQuadView.BAKE_NORMALIZED);
         emitter.emit();
@@ -122,10 +132,6 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         return blockView.getLightLevel(lightType, mutable);
     }
 
-    private static int packCornerLight(CornerLight cornerLight) {
-        return LightmapTextureManager.pack(cornerLight.block(), cornerLight.sky());
-    }
-
     private static int encodeNibblePayload(int bottomLeft, int bottomRight, int topLeft, int topRight) {
         return (clampLightNibble(bottomLeft))
             | (clampLightNibble(bottomRight) << 4)
@@ -133,15 +139,63 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
             | (clampLightNibble(topRight) << 12);
     }
 
-    private static int encodePayloadColor(int materialIndex, int blockPayload) {
+    private static int encodePayloadColor(int materialIndex, int neighborPayload) {
         return ((materialIndex & 0xFF) << 24)
-            | ((blockPayload & 0xFF) << 16)
-            | (((blockPayload >> 8) & 0xFF) << 8)
-            | 0xFF;
+            | ((neighborPayload & 0xFF) << 16)
+            | (((neighborPayload >> 8) & 0xFF) << 8)
+            | ((neighborPayload >> 16) & 0xFF);
+    }
+
+    private static int packCornerLight(CornerLight cornerLight) {
+        return LightmapTextureManager.pack(cornerLight.block(), cornerLight.sky());
     }
 
     private static int clampLightNibble(int lightLevel) {
         return Math.max(0, Math.min(15, lightLevel));
+    }
+
+    private static int packCustomLightmap(int packedLightmap, int blockPayload) {
+        int lightX = packedLightmap & 0xFFFF;
+        int lightY = (packedLightmap >>> 16) & 0xFFFF;
+        int payloadLow = blockPayload & 0xFF;
+        int payloadHigh = (blockPayload >>> 8) & 0xFF;
+        return (lightX | (payloadLow << 8)) | ((lightY | (payloadHigh << 8)) << 16);
+    }
+
+    private int sampleBlendNeighborPayload(BlockRenderView blockView, BlockPos pos, Direction face) {
+        FaceAxes axes = FaceAxes.forFace(face);
+        int uLow = sampleBlendNeighborMaterial(blockView, pos, face, axes.u().getOpposite());
+        int uHigh = sampleBlendNeighborMaterial(blockView, pos, face, axes.u());
+        int vLow = sampleBlendNeighborMaterial(blockView, pos, face, axes.v().getOpposite());
+        int vHigh = sampleBlendNeighborMaterial(blockView, pos, face, axes.v());
+        return encodeNeighborPayload(uLow, uHigh, vLow, vHigh);
+    }
+
+    private int sampleBlendNeighborMaterial(BlockRenderView blockView, BlockPos pos, Direction face, Direction edgeDirection) {
+        BlockPos neighborPos = pos.offset(edgeDirection);
+        BlockState neighborState = blockView.getBlockState(neighborPos);
+        WorldAlignedTextureMaterial neighborMaterial = TexturallTextureOverrides.materialFor(neighborState.getBlock());
+        if (neighborMaterial == null || neighborMaterial.materialIndex() == mat.materialIndex()) {
+            return 0;
+        }
+
+        BlockState faceNeighborState = blockView.getBlockState(neighborPos.offset(face));
+        if (!Block.shouldDrawSide(neighborState, faceNeighborState, face)) {
+            return 0;
+        }
+
+        return clampNeighborMaterial(neighborMaterial.materialIndex());
+    }
+
+    private static int encodeNeighborPayload(int uLow, int uHigh, int vLow, int vHigh) {
+        return clampNeighborMaterial(uLow)
+            | (clampNeighborMaterial(uHigh) << 6)
+            | (clampNeighborMaterial(vLow) << 12)
+            | (clampNeighborMaterial(vHigh) << 18);
+    }
+
+    private static int clampNeighborMaterial(int materialIndex) {
+        return Math.max(0, Math.min(63, materialIndex));
     }
 
     private static CornerLight sampleCornerLight(BlockRenderView blockView, BlockPos pos, Direction face, boolean uHigh, boolean vHigh) {
@@ -197,6 +251,30 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         return new CornerLight(block, sky);
     }
 
+    private static int averageLight(
+        BlockRenderView blockView,
+        BlockPos.Mutable mutable,
+        LightType lightType,
+        int x0,
+        int y0,
+        int z0,
+        int x1,
+        int y1,
+        int z1,
+        int x2,
+        int y2,
+        int z2,
+        int x3,
+        int y3,
+        int z3
+    ) {
+        int total = sampleLight(blockView, mutable, lightType, x0, y0, z0)
+            + sampleLight(blockView, mutable, lightType, x1, y1, z1)
+            + sampleLight(blockView, mutable, lightType, x2, y2, z2)
+            + sampleLight(blockView, mutable, lightType, x3, y3, z3);
+        return Math.round(total * 0.25F);
+    }
+
     private static int[] vertexLightmaps(Direction face, FaceLighting lighting) {
         return switch (face) {
             case DOWN, SOUTH, WEST -> new int[] {
@@ -224,30 +302,6 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
                 packCornerLight(lighting.topRight())
             };
         };
-    }
-
-    private static int averageLight(
-        BlockRenderView blockView,
-        BlockPos.Mutable mutable,
-        LightType lightType,
-        int x0,
-        int y0,
-        int z0,
-        int x1,
-        int y1,
-        int z1,
-        int x2,
-        int y2,
-        int z2,
-        int x3,
-        int y3,
-        int z3
-    ) {
-        int total = sampleLight(blockView, mutable, lightType, x0, y0, z0)
-            + sampleLight(blockView, mutable, lightType, x1, y1, z1)
-            + sampleLight(blockView, mutable, lightType, x2, y2, z2)
-            + sampleLight(blockView, mutable, lightType, x3, y3, z3);
-        return Math.round(total * 0.25F);
     }
 
     private void remapUv(MutableQuadView quad, BlockPos pos, Direction face) {
@@ -340,7 +394,7 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         return MinecraftClient.getInstance().getAtlasManager().getSprite(mat.normalSprite());
     }
 
-    private record GeometryKey(Class<?> delegateType, int x, int y, int z, int lightSignature) {
+    private record GeometryKey(Class<?> delegateType, int x, int y, int z, int lightSignature, int blendSignature) {
     }
 
     private record CornerLight(int block, int sky) {
