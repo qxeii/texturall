@@ -10,7 +10,6 @@ import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.render.LightmapTextureManager;
 import net.minecraft.client.render.model.BlockModelPart;
-import net.minecraft.client.render.model.BakedQuad;
 import net.minecraft.client.render.model.BlockStateModel;
 import net.minecraft.client.texture.Sprite;
 import net.minecraft.util.math.BlockPos;
@@ -20,7 +19,6 @@ import net.minecraft.world.LightType;
 import net.minecraft.world.BlockRenderView;
 import org.jspecify.annotations.Nullable;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Predicate;
 
@@ -35,12 +33,7 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
 
     @Override
     public void addParts(Random random, List<BlockModelPart> parts) {
-        List<BlockModelPart> originalParts = new ArrayList<>();
-        delegate.addParts(random, originalParts);
-        Sprite sprite = tileSprite();
-        for (BlockModelPart part : originalParts) {
-            parts.add(retexturePart(part, sprite));
-        }
+        delegate.addParts(random, parts);
     }
 
     @Override
@@ -393,42 +386,6 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         return wrapped < 0.0F ? wrapped + bound : wrapped;
     }
 
-    private static BlockModelPart retexturePart(BlockModelPart part, Sprite sprite) {
-        return new RetexturedBlockModelPart(
-            copyQuads(part.getQuads(Direction.DOWN), sprite),
-            copyQuads(part.getQuads(Direction.UP), sprite),
-            copyQuads(part.getQuads(Direction.NORTH), sprite),
-            copyQuads(part.getQuads(Direction.SOUTH), sprite),
-            copyQuads(part.getQuads(Direction.WEST), sprite),
-            copyQuads(part.getQuads(Direction.EAST), sprite),
-            copyQuads(part.getQuads(null), sprite),
-            part.useAmbientOcclusion(),
-            sprite
-        );
-    }
-
-    private static List<BakedQuad> copyQuads(List<BakedQuad> quads, Sprite sprite) {
-        List<BakedQuad> copied = new ArrayList<>(quads.size());
-        for (BakedQuad quad : quads) {
-            copied.add(new BakedQuad(
-                quad.position0(),
-                quad.position1(),
-                quad.position2(),
-                quad.position3(),
-                quad.packedUV0(),
-                quad.packedUV1(),
-                quad.packedUV2(),
-                quad.packedUV3(),
-                quad.tintIndex(),
-                quad.face(),
-                sprite,
-                false,
-                quad.lightEmission()
-            ));
-        }
-        return copied;
-    }
-
     private Sprite tileSprite() {
         return MinecraftClient.getInstance().getAtlasManager().getSprite(mat.tileSprite());
     }
@@ -444,43 +401,6 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
     }
 
     private record FaceLighting(CornerLight bottomLeft, CornerLight bottomRight, CornerLight topRight, CornerLight topLeft) {
-    }
-
-    private record RetexturedBlockModelPart(
-        List<BakedQuad> down,
-        List<BakedQuad> up,
-        List<BakedQuad> north,
-        List<BakedQuad> south,
-        List<BakedQuad> west,
-        List<BakedQuad> east,
-        List<BakedQuad> unculled,
-        boolean useAmbientOcclusion,
-        Sprite particleSprite
-    ) implements BlockModelPart {
-        @Override
-        public List<BakedQuad> getQuads(@Nullable Direction face) {
-            if (face == null) {
-                return unculled;
-            }
-            return switch (face) {
-                case DOWN -> down;
-                case UP -> up;
-                case NORTH -> north;
-                case SOUTH -> south;
-                case WEST -> west;
-                case EAST -> east;
-            };
-        }
-
-        @Override
-        public boolean useAmbientOcclusion() {
-            return useAmbientOcclusion;
-        }
-
-        @Override
-        public Sprite particleSprite() {
-            return particleSprite;
-        }
     }
 
     private record FaceAxes(Direction u, Direction v) {
