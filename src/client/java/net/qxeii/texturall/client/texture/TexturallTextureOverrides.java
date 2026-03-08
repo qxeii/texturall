@@ -9,8 +9,11 @@ import java.util.Map;
 
 public final class TexturallTextureOverrides {
     private static final int PALETTE_STEPS = 16;
+    private static final int MAX_EDGE_MATERIAL_ID = 63;
+    private static final int NORMAL_ATLAS_GRID_SIZE = 8;
     private static boolean bootstrapped;
     private static final Identifier MATERIAL_SHADER_INCLUDE_ID = Identifier.ofVanilla("shaders/include/texturall_materials.glsl");
+    private static final Identifier MATERIAL_NORMAL_ATLAS_ID = Identifier.of("texturall", "textures/material_normal_atlas.png");
     private static final Map<Block, WorldAlignedTextureMaterial> MATERIALS = new LinkedHashMap<>();
     private static final Map<Integer, Identifier> NORMAL_TEXTURES = new LinkedHashMap<>();
     private static int nextMaterialIndex = 1;
@@ -67,6 +70,7 @@ public final class TexturallTextureOverrides {
         registerVanillaBlock(Blocks.GILDED_BLACKSTONE, "gilded_blackstone", "gilded_blackstone", 0x47B0E29D5AF316C8L, noise(3.8, 0.95, 1.05, 1.05), "gilded_blackstone");
 
         ProceduralTextureRegistry.register(MATERIAL_SHADER_INCLUDE_ID, new TexturallMaterialShaderGenerator(MATERIALS.values()));
+        ProceduralTextureRegistry.register(MATERIAL_NORMAL_ATLAS_ID, new TexturallNormalAtlasGenerator(NORMAL_ATLAS_GRID_SIZE, MATERIALS.values()));
     }
 
     public static WorldAlignedTextureMaterial materialFor(Block block) {
@@ -75,6 +79,10 @@ public final class TexturallTextureOverrides {
 
     public static Identifier normalTextureForIndex(int materialIndex) {
         return NORMAL_TEXTURES.get(materialIndex);
+    }
+
+    public static Identifier normalAtlasTexture() {
+        return MATERIAL_NORMAL_ATLAS_ID;
     }
 
     private static void registerVanillaBlock(
@@ -92,6 +100,9 @@ public final class TexturallTextureOverrides {
         Identifier normalTextureResourceId = Identifier.ofVanilla("textures/block/world/" + name + "_normal.png");
         Identifier normalSpriteId = Identifier.ofVanilla("block/world/" + name + "_normal");
         int materialIndex = nextMaterialIndex++;
+        if (materialIndex > MAX_EDGE_MATERIAL_ID) {
+            throw new IllegalStateException("Texturall edge blending supports at most " + MAX_EDGE_MATERIAL_ID + " materials");
+        }
         Identifier[] paletteTextureIds = new Identifier[paletteTextureNames.length];
         for (int i = 0; i < paletteTextureNames.length; i++) {
             paletteTextureIds[i] = Identifier.ofVanilla("textures/block/" + paletteTextureNames[i] + ".png");

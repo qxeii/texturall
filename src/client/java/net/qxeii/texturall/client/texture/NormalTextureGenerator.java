@@ -21,13 +21,7 @@ public final class NormalTextureGenerator implements ProceduralTextureGenerator 
 
     @Override
     public byte[] generatePng() {
-        BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
-        double[] variation = sampleVariationField();
-        for (int y = 0; y < size; y++) {
-            for (int x = 0; x < size; x++) {
-                image.setRGB(x, y, sampleNormal(x, y, (float) variation[(y * size) + x]));
-            }
-        }
+        BufferedImage image = generateImage();
 
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
             ImageIO.write(image, "PNG", output);
@@ -35,6 +29,17 @@ public final class NormalTextureGenerator implements ProceduralTextureGenerator 
         } catch (IOException exception) {
             throw new IllegalStateException("Failed to encode generated normal texture", exception);
         }
+    }
+
+    public BufferedImage generateImage() {
+        BufferedImage image = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        double[] variation = sampleVariationField();
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                image.setRGB(x, y, sampleNormal(x, y, (float) variation[(y * size) + x]));
+            }
+        }
+        return image;
     }
 
     private double[] sampleVariationField() {

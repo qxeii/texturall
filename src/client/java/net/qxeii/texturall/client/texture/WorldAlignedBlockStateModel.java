@@ -22,6 +22,8 @@ import java.util.List;
 import java.util.function.Predicate;
 
 public final class WorldAlignedBlockStateModel implements BlockStateModel, FabricBlockStateModel {
+    private static final int EDGE_MATERIAL_MASK = 0x3F;
+
     private final BlockStateModel delegate;
     private final WorldAlignedTextureMaterial mat;
 
@@ -65,8 +67,10 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
     @Override
     public @Nullable Object createGeometryKey(BlockRenderView blockView, BlockPos pos, BlockState state, Random random) {
         int lightSignature = 1;
+        int mergeSignature = 1;
         for (Direction face : Direction.values()) {
             lightSignature = 31 * lightSignature + sampleFaceLighting(blockView, pos, face).hashCode();
+            mergeSignature = 31 * mergeSignature + sampleFaceMergeMaterials(blockView, pos, face).hashCode();
         }
 
         return new GeometryKey(
@@ -74,12 +78,14 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
             pos.getX(),
             pos.getY(),
             pos.getZ(),
-            lightSignature
+            lightSignature,
+            mergeSignature
         );
     }
 
     private void emitCanonicalFace(QuadEmitter emitter, BlockRenderView blockView, BlockPos pos, Direction face) {
         FaceLighting lighting = sampleFaceLighting(blockView, pos, face);
+        FaceMergeMaterials mergeMaterials = sampleFaceMergeMaterials(blockView, pos, face);
         emitter.nominalFace(face);
         emitter.cullFace(face);
         // Let the shader own all custom shading so Indigo does not add an extra AO or diffuse pass.
@@ -93,12 +99,13 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
             lighting.topLeft().block(),
             lighting.topRight().block()
         );
-        int payloadColor = encodePayloadColor(mat.materialIndex(), blockPayload);
+        int edgePayload = encodeEdgePayload(mergeMaterials.uMin(), mergeMaterials.uMax(), mergeMaterials.vMin(), mergeMaterials.vMax());
+        int payloadColor = encodePayloadColor(mat.materialIndex(), blockPayload, edgePayload);
         emitter.color(0, payloadColor);
         emitter.color(1, payloadColor);
         emitter.color(2, payloadColor);
         emitter.color(3, payloadColor);
-        int[] vertexLightmaps = vertexLightmaps(face, lighting);
+        int[] vertexLightmaps = vertexLightmaps(face, lighting, edgePayload);
         emitter.lightmap(vertexLightmaps[0], vertexLightmaps[1], vertexLightmaps[2], vertexLightmaps[3]);
         remapUv(emitter, pos, face);
         emitter.spriteBake(normalSprite(), MutableQuadView.BAKE_NORMALIZED);
@@ -122,6 +129,24 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         return blockView.getLightLevel(lightType, mutable);
     }
 
+    private FaceMergeMaterials sampleFaceMergeMaterials(BlockRenderView blockView, BlockPos pos, Direction face) {
+        TextureEdgeAxes axes = TextureEdgeAxes.forFace(face);
+        return new FaceMergeMaterials(
+            sampleMergeMaterial(blockView, pos, axes.uMin()),
+            sampleMergeMaterial(blockView, pos, axes.uMax()),
+            sampleMergeMaterial(blockView, pos, axes.vMin()),
+            sampleMergeMaterial(blockView, pos, axes.vMax())
+        );
+    }
+
+    private int sampleMergeMaterial(BlockRenderView blockView, BlockPos pos, Direction direction) {
+        WorldAlignedTextureMaterial neighbor = TexturallTextureOverrides.materialFor(blockView.getBlockState(pos.offset(direction)).getBlock());
+        if (neighbor == null || neighbor.materialIndex() == mat.materialIndex()) {
+            return 0;
+        }
+        return neighbor.materialIndex();
+    }
+
     private static int packCornerLight(CornerLight cornerLight) {
         return LightmapTextureManager.pack(cornerLight.block(), cornerLight.sky());
     }
@@ -133,15 +158,28 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
             | (clampLightNibble(topRight) << 12);
     }
 
-    private static int encodePayloadColor(int materialIndex, int blockPayload) {
+    private static int encodePayloadColor(int materialIndex, int blockPayload, int edgePayload) {
         return ((materialIndex & 0xFF) << 24)
             | ((blockPayload & 0xFF) << 16)
             | (((blockPayload >> 8) & 0xFF) << 8)
-            | 0xFF;
+            | (edgePayload & 0xFF);
     }
 
     private static int clampLightNibble(int lightLevel) {
         return Math.max(0, Math.min(15, lightLevel));
+    }
+
+    private static int encodeEdgePayload(int uMin, int uMax, int vMin, int vMax) {
+        return (uMin & EDGE_MATERIAL_MASK)
+            | ((uMax & EDGE_MATERIAL_MASK) << 6)
+            | ((vMin & EDGE_MATERIAL_MASK) << 12)
+            | ((vMax & EDGE_MATERIAL_MASK) << 18);
+    }
+
+    private static int attachEdgePayload(int lightmap, int edgePayload) {
+        return lightmap
+            | (((edgePayload >> 8) & 0xFF) << 8)
+            | (((edgePayload >> 16) & 0xFF) << 24);
     }
 
     private static CornerLight sampleCornerLight(BlockRenderView blockView, BlockPos pos, Direction face, boolean uHigh, boolean vHigh) {
@@ -197,31 +235,31 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         return new CornerLight(block, sky);
     }
 
-    private static int[] vertexLightmaps(Direction face, FaceLighting lighting) {
+    private static int[] vertexLightmaps(Direction face, FaceLighting lighting, int edgePayload) {
         return switch (face) {
             case DOWN, SOUTH, WEST -> new int[] {
-                packCornerLight(lighting.bottomLeft()),
-                packCornerLight(lighting.bottomRight()),
-                packCornerLight(lighting.topRight()),
-                packCornerLight(lighting.topLeft())
+                attachEdgePayload(packCornerLight(lighting.bottomLeft()), edgePayload),
+                attachEdgePayload(packCornerLight(lighting.bottomRight()), edgePayload),
+                attachEdgePayload(packCornerLight(lighting.topRight()), edgePayload),
+                attachEdgePayload(packCornerLight(lighting.topLeft()), edgePayload)
             };
             case UP -> new int[] {
-                packCornerLight(lighting.bottomLeft()),
-                packCornerLight(lighting.topLeft()),
-                packCornerLight(lighting.topRight()),
-                packCornerLight(lighting.bottomRight())
+                attachEdgePayload(packCornerLight(lighting.bottomLeft()), edgePayload),
+                attachEdgePayload(packCornerLight(lighting.topLeft()), edgePayload),
+                attachEdgePayload(packCornerLight(lighting.topRight()), edgePayload),
+                attachEdgePayload(packCornerLight(lighting.bottomRight()), edgePayload)
             };
             case NORTH -> new int[] {
-                packCornerLight(lighting.bottomRight()),
-                packCornerLight(lighting.bottomLeft()),
-                packCornerLight(lighting.topLeft()),
-                packCornerLight(lighting.topRight())
+                attachEdgePayload(packCornerLight(lighting.bottomRight()), edgePayload),
+                attachEdgePayload(packCornerLight(lighting.bottomLeft()), edgePayload),
+                attachEdgePayload(packCornerLight(lighting.topLeft()), edgePayload),
+                attachEdgePayload(packCornerLight(lighting.topRight()), edgePayload)
             };
             case EAST -> new int[] {
-                packCornerLight(lighting.bottomRight()),
-                packCornerLight(lighting.bottomLeft()),
-                packCornerLight(lighting.topLeft()),
-                packCornerLight(lighting.topRight())
+                attachEdgePayload(packCornerLight(lighting.bottomRight()), edgePayload),
+                attachEdgePayload(packCornerLight(lighting.bottomLeft()), edgePayload),
+                attachEdgePayload(packCornerLight(lighting.topLeft()), edgePayload),
+                attachEdgePayload(packCornerLight(lighting.topRight()), edgePayload)
             };
         };
     }
@@ -340,7 +378,7 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         return MinecraftClient.getInstance().getAtlasManager().getSprite(mat.normalSprite());
     }
 
-    private record GeometryKey(Class<?> delegateType, int x, int y, int z, int lightSignature) {
+    private record GeometryKey(Class<?> delegateType, int x, int y, int z, int lightSignature, int mergeSignature) {
     }
 
     private record CornerLight(int block, int sky) {
@@ -349,12 +387,28 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
     private record FaceLighting(CornerLight bottomLeft, CornerLight bottomRight, CornerLight topRight, CornerLight topLeft) {
     }
 
+    private record FaceMergeMaterials(int uMin, int uMax, int vMin, int vMax) {
+    }
+
     private record FaceAxes(Direction u, Direction v) {
         private static FaceAxes forFace(Direction face) {
             return switch (face) {
                 case UP, DOWN -> new FaceAxes(Direction.EAST, Direction.SOUTH);
                 case NORTH, SOUTH -> new FaceAxes(Direction.EAST, Direction.UP);
                 case WEST, EAST -> new FaceAxes(Direction.SOUTH, Direction.UP);
+            };
+        }
+    }
+
+    private record TextureEdgeAxes(Direction uMin, Direction uMax, Direction vMin, Direction vMax) {
+        private static TextureEdgeAxes forFace(Direction face) {
+            return switch (face) {
+                case UP -> new TextureEdgeAxes(Direction.WEST, Direction.EAST, Direction.SOUTH, Direction.NORTH);
+                case DOWN -> new TextureEdgeAxes(Direction.WEST, Direction.EAST, Direction.NORTH, Direction.SOUTH);
+                case NORTH -> new TextureEdgeAxes(Direction.WEST, Direction.EAST, Direction.UP, Direction.DOWN);
+                case SOUTH -> new TextureEdgeAxes(Direction.EAST, Direction.WEST, Direction.UP, Direction.DOWN);
+                case EAST -> new TextureEdgeAxes(Direction.NORTH, Direction.SOUTH, Direction.UP, Direction.DOWN);
+                case WEST -> new TextureEdgeAxes(Direction.SOUTH, Direction.NORTH, Direction.UP, Direction.DOWN);
             };
         }
     }

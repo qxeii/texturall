@@ -7,6 +7,7 @@
 #moj_import <minecraft:texturall_materials.glsl>
 
 uniform sampler2D Sampler0;
+uniform sampler2D Sampler1;
 uniform sampler2D Sampler2;
 
 in float sphericalVertexDistance;
@@ -18,6 +19,7 @@ in vec2 v_lightUv;
 in vec3 v_faceNormal;
 in vec3 v_worldPos;
 flat in int v_blockPayload;
+flat in int v_neighborPayload;
 flat in int v_materialId;
 
 out vec4 fragColor;
@@ -97,6 +99,14 @@ vec3 sampleLightmapAxis(vec2 uv) {
 float maxComponent(vec3 value) {
     return max(value.x, max(value.y, value.z));
 }
+
+const float TEXTURALL_TILE_TEXELS = 16.0;
+const float TEXTURALL_MERGE_TEXELS = 8.0;
+const float TEXTURALL_MERGE_WIDTH = TEXTURALL_MERGE_TEXELS / TEXTURALL_TILE_TEXELS;
+const int TEXTURALL_EDGE_MATERIAL_MASK = 63;
+const float TEXTURALL_NORMAL_ATLAS_GRID = 8.0;
+const float TEXTURALL_NORMAL_SHEET_SIZE = 256.0;
+const vec2 TEXTURALL_NORMAL_ATLAS_PIXEL_SIZE = vec2(1.0 / (TEXTURALL_NORMAL_ATLAS_GRID * TEXTURALL_NORMAL_SHEET_SIZE));
 
 vec3 axisAlignedNormal(vec3 normal) {
     vec3 absNormal = abs(normal);
@@ -238,6 +248,57 @@ vec2 worldAlignedUv(vec3 worldPos, vec3 faceNormal) {
     );
 }
 
+int decodeEdgeMaterial(int payload, int edgeIndex) {
+    return (payload >> (edgeIndex * 6)) & TEXTURALL_EDGE_MATERIAL_MASK;
+}
+
+float mergeWeightToMinEdge(float coord) {
+    return 1.0 - smoothstep(0.0, TEXTURALL_MERGE_WIDTH, coord);
+}
+
+float mergeWeightToMaxEdge(float coord) {
+    return smoothstep(1.0 - TEXTURALL_MERGE_WIDTH, 1.0, coord);
+}
+
+vec2 clampSheetUv(vec2 sheetUv) {
+    vec2 halfTexel = vec2(0.5 / TEXTURALL_NORMAL_SHEET_SIZE);
+    return clamp(sheetUv, halfTexel, vec2(1.0) - halfTexel);
+}
+
+vec2 materialNormalAtlasUv(int materialId, vec2 sheetUv) {
+    int slot = max(materialId - 1, 0);
+    float column = float(slot % int(TEXTURALL_NORMAL_ATLAS_GRID));
+    float row = floor(float(slot) / TEXTURALL_NORMAL_ATLAS_GRID);
+    return (vec2(column, row) + clampSheetUv(sheetUv)) / TEXTURALL_NORMAL_ATLAS_GRID;
+}
+
+vec4 sampleMaterialNormal(int materialId, vec2 sheetUv) {
+    return sampleNearest(Sampler1, materialNormalAtlasUv(materialId, sheetUv), TEXTURALL_NORMAL_ATLAS_PIXEL_SIZE);
+}
+
+void accumulateMergedMaterial(
+    int materialId,
+    float weight,
+    vec2 sheetUv,
+    inout vec3 tsNormalSum,
+    inout vec3 surfaceColorSum,
+    inout vec3 paletteStartSum,
+    inout vec3 paletteEndSum,
+    inout float totalWeight
+) {
+    if (materialId <= 0 || weight <= 0.0) {
+        return;
+    }
+
+    vec4 normalSample = sampleMaterialNormal(materialId, sheetUv);
+    float variation = normalSample.a;
+    tsNormalSum += decodeNormal(normalSample) * weight;
+    surfaceColorSum += materialPaletteColor(materialId, variation) * weight;
+    paletteStartSum += materialPaletteStartColor(materialId) * weight;
+    paletteEndSum += materialPaletteEndColor(materialId) * weight;
+    totalWeight += weight;
+}
+
 vec2 lightUvFromLevels(float blockLevel, float skyLevel) {
     return clamp((vec2(blockLevel, skyLevel) + 0.5) / 16.0, vec2(LIGHTMAP_MIN), vec2(15.5 / 16.0));
 }
@@ -292,26 +353,46 @@ void main() {
         mat3 tbn = faceTbn(faceNormal);
         mat3 lightBasis = faceLightBasis(faceNormal);
         vec2 atlasPixelSize = 1.0 / vec2(TextureSize);
+        vec2 sheetUv = worldAlignedUv(v_worldPos, faceNormal);
         vec4 normalSample = sampleNearest(Sampler0, texCoord0, atlasPixelSize);
-        vec3 tsNormal = decodeNormal(normalSample);
+        vec2 faceUv = faceLocalUv(v_worldPos - blockOrigin(v_worldPos, faceNormal), faceNormal);
+        float uMinWeight = mergeWeightToMinEdge(faceUv.x);
+        float uMaxWeight = mergeWeightToMaxEdge(faceUv.x);
+        float vMinWeight = mergeWeightToMinEdge(faceUv.y);
+        float vMaxWeight = mergeWeightToMaxEdge(faceUv.y);
+        int uMinMaterial = decodeEdgeMaterial(v_neighborPayload, 0);
+        int uMaxMaterial = decodeEdgeMaterial(v_neighborPayload, 1);
+        int vMinMaterial = decodeEdgeMaterial(v_neighborPayload, 2);
+        int vMaxMaterial = decodeEdgeMaterial(v_neighborPayload, 3);
+        vec3 tsNormalSum = decodeNormal(normalSample);
+        vec3 surfaceColorSum = materialPaletteColor(v_materialId, normalSample.a);
+        vec3 paletteStartSum = materialPaletteStartColor(v_materialId);
+        vec3 paletteEndSum = materialPaletteEndColor(v_materialId);
+        float materialWeight = 1.0;
+
+        accumulateMergedMaterial(uMinMaterial, uMinWeight, sheetUv, tsNormalSum, surfaceColorSum, paletteStartSum, paletteEndSum, materialWeight);
+        accumulateMergedMaterial(uMaxMaterial, uMaxWeight, sheetUv, tsNormalSum, surfaceColorSum, paletteStartSum, paletteEndSum, materialWeight);
+        accumulateMergedMaterial(vMinMaterial, vMinWeight, sheetUv, tsNormalSum, surfaceColorSum, paletteStartSum, paletteEndSum, materialWeight);
+        accumulateMergedMaterial(vMaxMaterial, vMaxWeight, sheetUv, tsNormalSum, surfaceColorSum, paletteStartSum, paletteEndSum, materialWeight);
+
+        vec3 tsNormal = normalize(tsNormalSum);
         vec3 worldNormal = normalize(tbn * tsNormal);
 
         vec3 sunDirection = normalizeOr(Light0_Direction, vec3(0.0, 1.0, 0.0));
         vec3 moonDirection = normalizeOr(Light1_Direction, -sunDirection);
-        float surfaceVariation = normalSample.a;
-        vec3 surfaceColor = materialPaletteColor(v_materialId, surfaceVariation);
-        vec3 paletteStartColor = materialPaletteStartColor(v_materialId);
-        vec3 paletteEndColor = materialPaletteEndColor(v_materialId);
         vec3 localPos = v_worldPos - blockOrigin(v_worldPos, faceNormal);
-        vec2 faceUv = alignToFaceTexelGrid(faceLightUv(localPos, faceNormal));
+        vec2 lightFaceUv = alignToFaceTexelGrid(faceLightUv(localPos, faceNormal));
+        vec3 surfaceColor = surfaceColorSum / materialWeight;
+        vec3 paletteStartColor = paletteStartSum / materialWeight;
+        vec3 paletteEndColor = paletteEndSum / materialWeight;
 
         float blockBottomLeft = decodePackedNibble(v_blockPayload, 0);
         float blockBottomRight = decodePackedNibble(v_blockPayload, 1);
         float blockTopLeft = decodePackedNibble(v_blockPayload, 2);
         float blockTopRight = decodePackedNibble(v_blockPayload, 3);
 
-        float blockLevel = bilerpLight(blockBottomLeft, blockBottomRight, blockTopLeft, blockTopRight, faceUv);
-        vec2 blockGradient = bilerpGradient(blockBottomLeft, blockBottomRight, blockTopLeft, blockTopRight, faceUv);
+        float blockLevel = bilerpLight(blockBottomLeft, blockBottomRight, blockTopLeft, blockTopRight, lightFaceUv);
+        vec2 blockGradient = bilerpGradient(blockBottomLeft, blockBottomRight, blockTopLeft, blockTopRight, lightFaceUv);
         vec3 blockDirection = normalizeOr(
             lightBasis * normalize(vec3(blockGradient, max(1.0, blockLevel * 0.35))),
             faceNormal
