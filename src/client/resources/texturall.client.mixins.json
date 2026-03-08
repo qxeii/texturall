@@ -4,6 +4,7 @@
   "package": "net.qxeii.texturall.mixin.client",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "AbstractTerrainRenderContextMixin",
     "MissingItemModelAccessor",
     "NamespaceResourceManagerMixin",
     "RenderPipelineAccessor",
