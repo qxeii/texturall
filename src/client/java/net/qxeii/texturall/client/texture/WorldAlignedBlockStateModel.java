@@ -7,6 +7,7 @@ import net.fabricmc.fabric.api.renderer.v1.model.FabricBlockStateModel;
 import net.fabricmc.fabric.api.util.TriState;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.render.block.MovingBlockRenderState;
 import net.minecraft.client.render.LightmapTextureManager;
 import net.minecraft.client.render.model.BlockModelPart;
 import net.minecraft.client.render.model.BlockStateModel;
@@ -16,6 +17,7 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.random.Random;
 import net.minecraft.world.LightType;
 import net.minecraft.world.BlockRenderView;
+import net.minecraft.world.EmptyBlockRenderView;
 import org.jspecify.annotations.Nullable;
 
 import java.util.List;
@@ -56,6 +58,11 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         Random random,
         Predicate<@Nullable Direction> cullTest
     ) {
+        if (!supportsTerrainShading(blockView)) {
+            ((FabricBlockStateModel) delegate).emitQuads(emitter, blockView, pos, state, random, cullTest);
+            return;
+        }
+
         for (Direction face : Direction.values()) {
             if (cullTest.test(face)) {
                 continue;
@@ -66,6 +73,10 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
 
     @Override
     public @Nullable Object createGeometryKey(BlockRenderView blockView, BlockPos pos, BlockState state, Random random) {
+        if (!supportsTerrainShading(blockView)) {
+            return ((FabricBlockStateModel) delegate).createGeometryKey(blockView, pos, state, random);
+        }
+
         int lightSignature = 1;
         int mergeSignature = 1;
         for (Direction face : Direction.values()) {
@@ -75,6 +86,7 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
 
         return new GeometryKey(
             delegate.getClass(),
+            mat.materialIndex(),
             pos.getX(),
             pos.getY(),
             pos.getZ(),
@@ -378,7 +390,11 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         return MinecraftClient.getInstance().getAtlasManager().getSprite(mat.normalSprite());
     }
 
-    private record GeometryKey(Class<?> delegateType, int x, int y, int z, int lightSignature, int mergeSignature) {
+    private static boolean supportsTerrainShading(BlockRenderView blockView) {
+        return !(blockView instanceof EmptyBlockRenderView) && !(blockView instanceof MovingBlockRenderState);
+    }
+
+    private record GeometryKey(Class<?> delegateType, int materialIndex, int x, int y, int z, int lightSignature, int mergeSignature) {
     }
 
     private record CornerLight(int block, int sky) {
