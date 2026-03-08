@@ -22,19 +22,12 @@ out vec2 v_lightUv;
 out vec3 v_faceNormal;
 out vec3 v_worldPos;
 flat out int v_blockPayload;
-flat out int v_neighborPayload;
 flat out int v_materialId;
-
-int unpackUnsignedShort(int value) {
-    return value < 0 ? value + 65536 : value;
-}
 
 void main() {
     vec3 pos = Position + (ChunkPosition - CameraBlockPos) + CameraOffset;
     gl_Position = ProjMat * ModelViewMat * vec4(pos, 1.0);
-    int uv2x = unpackUnsignedShort(UV2.x);
-    int uv2y = unpackUnsignedShort(UV2.y);
-    vec2 lightUv = clamp((vec2(uv2x % 256, uv2y % 256) / 256.0) + 0.5 / 16.0, vec2(0.5 / 16.0), vec2(15.5 / 16.0));
+    vec2 lightUv = clamp((vec2(UV2) / 256.0) + 0.5 / 16.0, vec2(0.5 / 16.0), vec2(15.5 / 16.0));
 
     sphericalVertexDistance = fog_spherical_distance(pos);
     cylindricalVertexDistance = fog_cylindrical_distance(pos);
@@ -45,7 +38,6 @@ void main() {
     v_faceNormal = Normal;
     v_worldPos = Position + ChunkPosition;
     ivec3 colorBytes = ivec3(Color.rgb * 255.0 + 0.5);
-    v_neighborPayload = colorBytes.r + colorBytes.g * 256 + colorBytes.b * 65536;
-    v_blockPayload = (uv2x / 256) + (uv2y / 256) * 256;
+    v_blockPayload = colorBytes.r + colorBytes.g * 256;
     v_materialId = int(Color.a * 255.0 + 0.5);
 }
