@@ -332,10 +332,6 @@ void accumulateMergedMaterial(
     totalWeight += weight;
 }
 
-vec2 lightUvFromLevels(float blockLevel, float skyLevel) {
-    return clamp((vec2(blockLevel, skyLevel) + 0.5) / 16.0, vec2(LIGHTMAP_MIN), vec2(15.5 / 16.0));
-}
-
 float decodePackedNibble(int packedValue, int nibbleIndex) {
     int divisor = 1;
     if (nibbleIndex == 1) {
@@ -348,6 +344,10 @@ float decodePackedNibble(int packedValue, int nibbleIndex) {
     return float((packedValue / divisor) % 16);
 }
 
+float decodePackedNibbleNormalized(int packedValue, int nibbleIndex) {
+    return decodePackedNibble(packedValue, nibbleIndex) / 15.0;
+}
+
 vec2 alignToFaceTexelGrid(vec2 faceUv) {
     return clamp((floor(faceUv * TEXTURALL_TILE_TEXELS) + 0.5) / TEXTURALL_TILE_TEXELS, vec2(0.0), vec2(1.0));
 }
@@ -356,12 +356,6 @@ float bilerpLight(float bottomLeft, float bottomRight, float topLeft, float topR
     float bottom = mix(bottomLeft, bottomRight, faceUv.x);
     float top = mix(topLeft, topRight, faceUv.x);
     return mix(bottom, top, faceUv.y);
-}
-
-vec2 bilerpGradient(float bottomLeft, float bottomRight, float topLeft, float topRight, vec2 faceUv) {
-    float du = mix(bottomRight - bottomLeft, topRight - topLeft, faceUv.y);
-    float dv = mix(topLeft - bottomLeft, topRight - bottomRight, faceUv.x);
-    return vec2(du, dv);
 }
 
 void main() {
@@ -383,7 +377,6 @@ void main() {
     if (isCustomMaterial) {
         vec3 faceNormal = axisAlignedNormal(normalize(v_faceNormal));
         mat3 tbn = faceTbn(faceNormal);
-        mat3 lightBasis = faceLightBasis(faceNormal);
         vec2 atlasPixelSize = 1.0 / vec2(TextureSize);
         vec4 normalSample = sampleNearest(Sampler0, texCoord0, atlasPixelSize);
         vec3 blockMin = blockOrigin(v_worldPos, faceNormal);
@@ -417,46 +410,22 @@ void main() {
         vec3 moonDirection = normalizeOr(Light1_Direction, -sunDirection);
         vec2 lightFaceUv = alignToFaceTexelGrid(faceLightUv(localPos, faceNormal));
         vec3 surfaceColor = surfaceColorSum / materialWeight;
-        vec3 paletteStartColor = paletteStartSum / materialWeight;
-        vec3 paletteEndColor = paletteEndSum / materialWeight;
-
-        float blockBottomLeft = decodePackedNibble(v_blockPayload, 0);
-        float blockBottomRight = decodePackedNibble(v_blockPayload, 1);
-        float blockTopLeft = decodePackedNibble(v_blockPayload, 2);
-        float blockTopRight = decodePackedNibble(v_blockPayload, 3);
-
-        float blockLevel = bilerpLight(blockBottomLeft, blockBottomRight, blockTopLeft, blockTopRight, lightFaceUv);
-        vec2 blockGradient = bilerpGradient(blockBottomLeft, blockBottomRight, blockTopLeft, blockTopRight, lightFaceUv);
-        vec3 blockDirection = normalizeOr(
-            lightBasis * normalize(vec3(blockGradient, max(1.0, blockLevel * 0.35))),
-            faceNormal
-        );
+        float aoBottomLeft = decodePackedNibbleNormalized(v_blockPayload, 0);
+        float aoBottomRight = decodePackedNibbleNormalized(v_blockPayload, 1);
+        float aoTopLeft = decodePackedNibbleNormalized(v_blockPayload, 2);
+        float aoTopRight = decodePackedNibbleNormalized(v_blockPayload, 3);
+        float ambientOcclusion = bilerpLight(aoBottomLeft, aoBottomRight, aoTopLeft, aoTopRight, lightFaceUv);
 
         float sunVisibility = horizonFade(sunDirection);
         float moonVisibility = horizonFade(moonDirection);
         float sunDirect = lambert(worldNormal, sunDirection) * sunVisibility;
         float moonDirect = lambert(worldNormal, moonDirection) * moonVisibility;
-        float skyDirectional = clamp(sunDirect + moonDirect * 0.55, 0.0, 1.0);
-        vec3 skyLight = sampleLightmapAxis(vec2(LIGHTMAP_MIN, v_lightUv.y));
-        vec3 blockLight = sampleLightmapAxis(vec2(lightUvFromLevels(blockLevel, 0.0).x, LIGHTMAP_MIN));
-
-        float blockShade = lambert(worldNormal, blockDirection);
-        vec3 baseAlbedo = mix(surfaceColor, paletteStartColor, 0.18);
-        vec3 skyTint = (paletteEndColor - surfaceColor) * 0.035;
-        vec3 blockTint = (paletteEndColor - surfaceColor) * 0.025;
-        float skyLightLevel = clamp(maxComponent(skyLight) * 1.75, 0.0, 1.0);
-        float blockLightLevel = clamp(maxComponent(blockLight) * 2.1, 0.0, 1.0);
-        float skyAmbient = mix(0.10, 0.60, skyLightLevel) * clamp(sunVisibility + moonVisibility * 0.35, 0.0, 1.0);
-        float skyDirectionalWeight = mix(0.48, 0.16, skyLightLevel);
-        float blockAmbient = mix(0.12, 0.42, blockLightLevel);
-        float blockDirectionalWeight = mix(0.82, 0.40, blockLightLevel);
-        vec3 skyEnergy = skyLight * min(vec3(skyAmbient + skyDirectional * skyDirectionalWeight), vec3(0.78));
-        vec3 blockEnergy = blockLight * min(vec3(blockAmbient + blockShade * blockDirectionalWeight), vec3(0.88));
-        vec3 combinedEnergy = min(skyEnergy + blockEnergy, vec3(0.92));
-
-        vec3 lighting = baseAlbedo * combinedEnergy;
-        lighting += skyLight * skyDirectional * skyTint * mix(0.85, 0.35, skyLightLevel);
-        lighting += blockLight * blockShade * blockTint * mix(0.90, 0.45, blockLightLevel);
+        float directionalLight = clamp(sunDirect + moonDirect * 0.55, 0.0, 1.0);
+        vec3 worldLight = texture(Sampler2, v_lightUv).rgb;
+        float worldLightLevel = clamp(maxComponent(worldLight) * 1.25, 0.0, 1.0);
+        float skyPresence = clamp(sunVisibility + moonVisibility * 0.35, 0.0, 1.0);
+        float normalAccent = 1.0 + (directionalLight - 0.5) * 0.10 * worldLightLevel * skyPresence;
+        vec3 lighting = surfaceColor * worldLight * ambientOcclusion * normalAccent;
         color = vec4(max(lighting, vec3(0.0)), 1.0);
     } else {
         // --- Vanilla block: unchanged ---

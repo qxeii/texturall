@@ -1,7 +1,9 @@
 package net.qxeii.texturall.mixin.client;
 
 import net.fabricmc.fabric.impl.client.indigo.renderer.helper.ColorHelper;
+import net.fabricmc.fabric.impl.client.indigo.renderer.mesh.MutableQuadViewImpl;
 import net.fabricmc.fabric.impl.client.indigo.renderer.render.AbstractTerrainRenderContext;
+import net.qxeii.texturall.client.texture.WorldAlignedBlockStateModel;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
@@ -18,7 +20,18 @@ public abstract class AbstractTerrainRenderContextMixin {
             target = "Lnet/fabricmc/fabric/impl/client/indigo/renderer/helper/ColorHelper;maxLight(II)I"
         )
     )
-    private int texturall$preserveNeighborPayload(int quadLightmap, int computedLightmap) {
+    private int texturall$preserveNeighborPayload(
+        int quadLightmap,
+        int computedLightmap,
+        MutableQuadViewImpl quad,
+        boolean ao,
+        boolean emissive,
+        boolean vanillaShade
+    ) {
+        if (quad.tag() == WorldAlignedBlockStateModel.TEXTURALL_TERRAIN_QUAD_TAG) {
+            return quadLightmap;
+        }
+
         int mergedLightmap = ColorHelper.maxLight(quadLightmap, computedLightmap);
         if ((quadLightmap & TEXTURALL_EDGE_PAYLOAD_MASK) == 0) {
             return mergedLightmap;

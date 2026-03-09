@@ -25,6 +25,7 @@ import java.util.function.Predicate;
 
 public final class WorldAlignedBlockStateModel implements BlockStateModel, FabricBlockStateModel {
     private static final int EDGE_MATERIAL_MASK = 0x3F;
+    public static final int TEXTURALL_TERRAIN_QUAD_TAG = 0x5458544C;
 
     private final BlockStateModel delegate;
     private final WorldAlignedTextureMaterial mat;
@@ -81,6 +82,7 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         int mergeSignature = 1;
         for (Direction face : Direction.values()) {
             lightSignature = 31 * lightSignature + sampleFaceLighting(blockView, pos, face).hashCode();
+            lightSignature = 31 * lightSignature + sampleFaceOcclusion(blockView, pos, face).hashCode();
             mergeSignature = 31 * mergeSignature + sampleFaceMergeMaterials(blockView, pos, face).hashCode();
         }
 
@@ -97,6 +99,7 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
 
     private void emitCanonicalFace(QuadEmitter emitter, BlockRenderView blockView, BlockPos pos, Direction face) {
         FaceLighting lighting = sampleFaceLighting(blockView, pos, face);
+        FaceOcclusion occlusion = sampleFaceOcclusion(blockView, pos, face);
         FaceMergeMaterials mergeMaterials = sampleFaceMergeMaterials(blockView, pos, face);
         emitter.nominalFace(face);
         emitter.cullFace(face);
@@ -104,15 +107,16 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         emitter.diffuseShade(false);
         emitter.ambientOcclusion(TriState.FALSE);
         emitter.shadeMode(ShadeMode.VANILLA);
+        emitter.tag(TEXTURALL_TERRAIN_QUAD_TAG);
         writeFacePositions(emitter, face);
-        int blockPayload = encodeNibblePayload(
-            lighting.bottomLeft().block(),
-            lighting.bottomRight().block(),
-            lighting.topLeft().block(),
-            lighting.topRight().block()
+        int aoPayload = encodeNibblePayload(
+            occlusion.bottomLeft(),
+            occlusion.bottomRight(),
+            occlusion.topLeft(),
+            occlusion.topRight()
         );
         int edgePayload = encodeEdgePayload(mergeMaterials.uMin(), mergeMaterials.uMax(), mergeMaterials.vMin(), mergeMaterials.vMax());
-        int payloadColor = encodePayloadColor(mat.materialIndex(), blockPayload, edgePayload);
+        int payloadColor = encodePayloadColor(mat.materialIndex(), aoPayload, edgePayload);
         emitter.color(0, payloadColor);
         emitter.color(1, payloadColor);
         emitter.color(2, payloadColor);
@@ -132,13 +136,17 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         return new FaceLighting(bottomLeft, bottomRight, topRight, topLeft);
     }
 
-    private static int sampleBlockLight(BlockRenderView blockView, BlockPos.Mutable mutable, int x, int y, int z) {
-        return sampleLight(blockView, mutable, LightType.BLOCK, x, y, z);
-    }
-
     private static int sampleLight(BlockRenderView blockView, BlockPos.Mutable mutable, LightType lightType, int x, int y, int z) {
         mutable.set(x, y, z);
         return blockView.getLightLevel(lightType, mutable);
+    }
+
+    private FaceOcclusion sampleFaceOcclusion(BlockRenderView blockView, BlockPos pos, Direction face) {
+        float bottomLeft = sampleCornerOcclusion(blockView, pos, face, false, false);
+        float bottomRight = sampleCornerOcclusion(blockView, pos, face, true, false);
+        float topRight = sampleCornerOcclusion(blockView, pos, face, true, true);
+        float topLeft = sampleCornerOcclusion(blockView, pos, face, false, true);
+        return new FaceOcclusion(bottomLeft, bottomRight, topRight, topLeft);
     }
 
     private FaceMergeMaterials sampleFaceMergeMaterials(BlockRenderView blockView, BlockPos pos, Direction face) {
@@ -163,11 +171,11 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         return LightmapTextureManager.pack(cornerLight.block(), cornerLight.sky());
     }
 
-    private static int encodeNibblePayload(int bottomLeft, int bottomRight, int topLeft, int topRight) {
-        return (clampLightNibble(bottomLeft))
-            | (clampLightNibble(bottomRight) << 4)
-            | (clampLightNibble(topLeft) << 8)
-            | (clampLightNibble(topRight) << 12);
+    private static int encodeNibblePayload(float bottomLeft, float bottomRight, float topLeft, float topRight) {
+        return quantizeOcclusionNibble(bottomLeft)
+            | (quantizeOcclusionNibble(bottomRight) << 4)
+            | (quantizeOcclusionNibble(topLeft) << 8)
+            | (quantizeOcclusionNibble(topRight) << 12);
     }
 
     private static int encodePayloadColor(int materialIndex, int blockPayload, int edgePayload) {
@@ -177,8 +185,8 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
             | (edgePayload & 0xFF);
     }
 
-    private static int clampLightNibble(int lightLevel) {
-        return Math.max(0, Math.min(15, lightLevel));
+    private static int quantizeOcclusionNibble(float ambientOcclusion) {
+        return Math.max(0, Math.min(15, Math.round(ambientOcclusion * 15.0F)));
     }
 
     private static int encodeEdgePayload(int uMin, int uMax, int vMin, int vMax) {
@@ -247,6 +255,40 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
         return new CornerLight(block, sky);
     }
 
+    private static float sampleCornerOcclusion(BlockRenderView blockView, BlockPos pos, Direction face, boolean uHigh, boolean vHigh) {
+        FaceAxes axes = FaceAxes.forFace(face);
+        int baseX = pos.getX() + face.getOffsetX();
+        int baseY = pos.getY() + face.getOffsetY();
+        int baseZ = pos.getZ() + face.getOffsetZ();
+        int cornerX = baseX + (uHigh ? axes.u().getOffsetX() : 0) + (vHigh ? axes.v().getOffsetX() : 0);
+        int cornerY = baseY + (uHigh ? axes.u().getOffsetY() : 0) + (vHigh ? axes.v().getOffsetY() : 0);
+        int cornerZ = baseZ + (uHigh ? axes.u().getOffsetZ() : 0) + (vHigh ? axes.v().getOffsetZ() : 0);
+        int uStepX = axes.u().getOffsetX();
+        int uStepY = axes.u().getOffsetY();
+        int uStepZ = axes.u().getOffsetZ();
+        int vStepX = axes.v().getOffsetX();
+        int vStepY = axes.v().getOffsetY();
+        int vStepZ = axes.v().getOffsetZ();
+        BlockPos.Mutable mutable = new BlockPos.Mutable();
+
+        return averageOcclusion(
+            blockView,
+            mutable,
+            cornerX,
+            cornerY,
+            cornerZ,
+            cornerX - uStepX,
+            cornerY - uStepY,
+            cornerZ - uStepZ,
+            cornerX - vStepX,
+            cornerY - vStepY,
+            cornerZ - vStepZ,
+            cornerX - uStepX - vStepX,
+            cornerY - uStepY - vStepY,
+            cornerZ - uStepZ - vStepZ
+        );
+    }
+
     private static int[] vertexLightmaps(Direction face, FaceLighting lighting, int edgePayload) {
         return switch (face) {
             case DOWN, SOUTH, WEST -> new int[] {
@@ -298,6 +340,34 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
             + sampleLight(blockView, mutable, lightType, x2, y2, z2)
             + sampleLight(blockView, mutable, lightType, x3, y3, z3);
         return Math.round(total * 0.25F);
+    }
+
+    private static float averageOcclusion(
+        BlockRenderView blockView,
+        BlockPos.Mutable mutable,
+        int x0,
+        int y0,
+        int z0,
+        int x1,
+        int y1,
+        int z1,
+        int x2,
+        int y2,
+        int z2,
+        int x3,
+        int y3,
+        int z3
+    ) {
+        float total = sampleOcclusion(blockView, mutable, x0, y0, z0)
+            + sampleOcclusion(blockView, mutable, x1, y1, z1)
+            + sampleOcclusion(blockView, mutable, x2, y2, z2)
+            + sampleOcclusion(blockView, mutable, x3, y3, z3);
+        return total * 0.25F;
+    }
+
+    private static float sampleOcclusion(BlockRenderView blockView, BlockPos.Mutable mutable, int x, int y, int z) {
+        mutable.set(x, y, z);
+        return blockView.getBlockState(mutable).getAmbientOcclusionLightLevel(blockView, mutable);
     }
 
     private void remapUv(MutableQuadView quad, BlockPos pos, Direction face) {
@@ -401,6 +471,9 @@ public final class WorldAlignedBlockStateModel implements BlockStateModel, Fabri
     }
 
     private record FaceLighting(CornerLight bottomLeft, CornerLight bottomRight, CornerLight topRight, CornerLight topLeft) {
+    }
+
+    private record FaceOcclusion(float bottomLeft, float bottomRight, float topRight, float topLeft) {
     }
 
     private record FaceMergeMaterials(int uMin, int uMax, int vMin, int vMax) {
